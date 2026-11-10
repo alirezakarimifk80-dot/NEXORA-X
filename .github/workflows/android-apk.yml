@@ -44,11 +44,16 @@ jobs:
       - name: 3. Set Up Android SDK (API 35 & Build-Tools 35.0.0)
         id: android_sdk_setup
         run: |
-          set -euo pipefail
+          set -e
 
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          mkdir -p "${SDK_ROOT}"
-          sudo chown -R "$USER:$USER" "${SDK_ROOT}" || true
+          mkdir -p "${SDK_ROOT}/licenses" "${SDK_ROOT}/platforms" "${SDK_ROOT}/build-tools"
+          sudo chown -R "$USER:$USER" \
+            "${SDK_ROOT}/licenses" \
+            "${SDK_ROOT}/platforms" \
+            "${SDK_ROOT}/build-tools" \
+            "${SDK_ROOT}/platform-tools" \
+            "${SDK_ROOT}/cmdline-tools" 2>/dev/null || true
 
           echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
@@ -80,17 +85,33 @@ jobs:
           "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --version
 
           # Accept all Android SDK licenses deterministically (both hash files and sdkmanager --licenses)
-          mkdir -p "${SDK_ROOT}/licenses"
-          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "${SDK_ROOT}/licenses/android-sdk-license"
-          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${SDK_ROOT}/licenses/android-sdk-preview-license"
-          yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --licenses > /dev/null || true
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "${SDK_ROOT}/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "${SDK_ROOT}/licenses/android-sdk-preview-license"
+          yes 2>/dev/null | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
 
-          # Install only the required Android SDK packages for NEXORA X (compileSdk = 35)
-          echo "Installing platform-tools, platforms;android-${COMPILE_SDK}, and build-tools;${BUILD_TOOLS_VERSION}..."
-          yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" \
-            "platform-tools" \
-            "platforms;android-${COMPILE_SDK}" \
-            "build-tools;${BUILD_TOOLS_VERSION}"
+          # Install required Android SDK packages if not already present on the runner
+          PACKAGES_TO_INSTALL=()
+          if [ ! -d "${SDK_ROOT}/platform-tools" ]; then
+            PACKAGES_TO_INSTALL+=("platform-tools")
+          fi
+          if [ ! -f "${SDK_ROOT}/platforms/android-${COMPILE_SDK}/android.jar" ]; then
+            PACKAGES_TO_INSTALL+=("platforms;android-${COMPILE_SDK}")
+          fi
+          if [ ! -d "${SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}" ]; then
+            PACKAGES_TO_INSTALL+=("build-tools;${BUILD_TOOLS_VERSION}")
+          fi
+
+          if [ "${#PACKAGES_TO_INSTALL[@]}" -gt 0 ]; then
+            echo "Installing missing SDK packages: ${PACKAGES_TO_INSTALL[*]}"
+            yes 2>/dev/null | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" "${PACKAGES_TO_INSTALL[@]}" || true
+          else
+            echo "All required SDK packages (platform-tools, platforms;android-${COMPILE_SDK}, build-tools;${BUILD_TOOLS_VERSION}) are already pre-installed on runner."
+          fi
+
+          # Strictly verify required SDK components exist on disk
+          test -f "${SDK_ROOT}/platforms/android-${COMPILE_SDK}/android.jar"
+          test -d "${SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}"
+          echo "Verified android-${COMPILE_SDK} and build-tools ${BUILD_TOOLS_VERSION} at ${SDK_ROOT}"
 
           echo "${SDK_ROOT}/platform-tools" >> "$GITHUB_PATH"
           echo "${SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}" >> "$GITHUB_PATH"
