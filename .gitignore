@@ -1,0 +1,25 @@
+# Web & Node.js
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+
+# Environment & Secrets (Never commit tokens, keys, or secrets)
+.env*
+!.env.example
+
+# Android & Gradle Build Artifacts
+.gradle/
+build/
+app/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Keystores & Signing Secrets (Never commit private signing keys)
+*.jks
+*.keystore
+keystore.properties
+signing.properties

@@ -1,0 +1,188 @@
+name: NEXORA X — Android Debug APK CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_reason:
+        description: 'Optional note for this manual APK build'
+        required: false
+        default: 'Manual workflow_dispatch build'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '17'
+  GRADLE_VERSION: '8.9'
+  APP_MODULE: ':app'
+  APK_OUTPUT_DIR: 'app/build/outputs/apk/debug'
+
+jobs:
+  build-debug-apk:
+    name: Test & Assemble NEXORA X Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 2. Install JDK 17 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 3. Set Up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 4. Configure Gradle 8.9 & Dependency Caching
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: false
+
+      - name: 5. Ensure Gradle Wrapper Binary & Executable Permissions
+        run: |
+          chmod +x ./gradlew
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Bootstrapping gradle-wrapper.jar using Gradle ${GRADLE_VERSION}..."
+            gradle wrapper --gradle-version "${GRADLE_VERSION}"
+            chmod +x ./gradlew
+          fi
+
+      - name: 6. Run Unit Tests (./gradlew testDebugUnitTest)
+        id: unit_tests
+        run: |
+          echo "Running NEXORA X unit test suites (Phase 1, Phase 2, Phase 3)..."
+          ./gradlew testDebugUnitTest --stacktrace
+
+      - name: 7. Build Android Debug APK (./gradlew assembleDebug)
+        id: assemble_debug
+        run: |
+          echo "Assembling NEXORA X Debug APK (:app:assembleDebug)..."
+          ./gradlew assembleDebug --stacktrace
+
+      - name: 8. Verify APK Output & Generate build-info.txt
+        id: verify_and_metadata
+        run: |
+          set -euo pipefail
+
+          echo "Inspecting APK output directory: ${APK_OUTPUT_DIR}"
+          if [ ! -d "${APK_OUTPUT_DIR}" ]; then
+            echo "::error::APK output directory '${APK_OUTPUT_DIR}' was not created by assembleDebug."
+            exit 1
+          fi
+
+          APK_FILE=$(find "${APK_OUTPUT_DIR}" -maxdepth 1 -type f -name "*.apk" | head -n 1 || true)
+          if [ -z "${APK_FILE}" ] || [ ! -s "${APK_FILE}" ]; then
+            echo "::error::No valid non-empty Debug APK file was found in '${APK_OUTPUT_DIR}'."
+            exit 1
+          fi
+
+          APK_FILENAME=$(basename "${APK_FILE}")
+          APK_BYTES=$(wc -c < "${APK_FILE}" | tr -d ' ')
+          APK_SHA256=$(sha256sum "${APK_FILE}" | awk '{print $1}')
+
+          VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -n 1 | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          SINGBOX_VERSION=$(grep -E 'PINNED_SING_BOX_VERSION\s*=' app/src/main/java/com/nexora/x/core/engine/LibboxManager.kt | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "1.10.7")
+          BUILD_DATE_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          cat <<EOF > build-info.txt
+          ============================================================
+          NEXORA X — ANDROID BUILD INFORMATION
+          ============================================================
+          App Name         : NEXORA X
+          Package Name     : com.nexora.x (Debug App ID: com.nexora.x.debug)
+          Build Date (UTC) : ${BUILD_DATE_UTC}
+          Git Commit SHA   : ${GITHUB_SHA}
+          Git Ref / Branch : ${GITHUB_REF_NAME}
+          Build Variant    : debug
+          Version Name     : ${VERSION_NAME}-debug (base: ${VERSION_NAME})
+          Version Code     : ${VERSION_CODE}
+          sing-box Version : ${SINGBOX_VERSION} (io.nekohasekai.libbox)
+          JDK Version      : ${JAVA_VERSION} (Eclipse Temurin)
+          Gradle Version   : ${GRADLE_VERSION}
+          APK File Name    : ${APK_FILENAME}
+          APK File Path    : ${APK_FILE}
+          APK Size (Bytes) : ${APK_BYTES}
+          APK SHA-256      : ${APK_SHA256}
+          ============================================================
+          EOF
+
+          cp build-info.txt "${APK_OUTPUT_DIR}/build-info.txt"
+          cat build-info.txt
+
+          {
+            echo "### NEXORA X Debug APK Build Succeeded"
+            echo ""
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| **App Name** | \`NEXORA X\` |"
+            echo "| **Package Name** | \`com.nexora.x\` (\`com.nexora.x.debug\`) |"
+            echo "| **Build Variant** | \`debug\` |"
+            echo "| **Version Name** | \`${VERSION_NAME}-debug\` |"
+            echo "| **Version Code** | \`${VERSION_CODE}\` |"
+            echo "| **sing-box Version** | \`${SINGBOX_VERSION}\` (\`io.nekohasekai.libbox\`) |"
+            echo "| **Git Commit SHA** | \`${GITHUB_SHA}\` |"
+            echo "| **Build Date (UTC)** | \`${BUILD_DATE_UTC}\` |"
+            echo "| **APK File** | \`${APK_FILE}\` (\`${APK_BYTES}\` bytes) |"
+            echo "| **APK SHA-256** | \`${APK_SHA256}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 9. Upload NEXORA-X-APK Artifact (APK + build-info.txt)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-X-APK
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            build-info.txt
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: 10. Diagnose Build or Test Failure
+        if: failure()
+        run: |
+          echo "::error::NEXORA X workflow failed. Inspecting failing stage and Gradle logs..."
+          FAILED_TASK="Unknown Gradle / Setup Task"
+          CAUSE_EXPLANATION="A setup or Gradle initialization step failed before task execution."
+          CONCRETE_FIX="Verify gradle/libs.versions.toml, JDK 17 setup, and network access to Google Maven / Maven Central."
+
+          if [ "${{ steps.unit_tests.outcome }}" == "failure" ]; then
+            FAILED_TASK=":app:testDebugUnitTest"
+            CAUSE_EXPLANATION="One or more JUnit 4 unit tests in app/src/test/ failed, or test compilation encountered a Kotlin/KSP error."
+            CONCRETE_FIX="Inspect the stacktrace under step '6. Run Unit Tests' or app/build/reports/tests/testDebugUnitTest/index.html. Run './gradlew testDebugUnitTest --info' locally to reproduce."
+          elif [ "${{ steps.assemble_debug.outcome }}" == "failure" ]; then
+            FAILED_TASK=":app:assembleDebug"
+            CAUSE_EXPLANATION="Android Debug APK compilation, KSP (Room/Hilt) code generation, or resource packaging failed."
+            CONCRETE_FIX="Check step '7. Build Android Debug APK' for unresolved symbols, Room schema errors, or AndroidManifest.xml issues. Run './gradlew assembleDebug --stacktrace' locally."
+          elif [ "${{ steps.verify_and_metadata.outcome }}" == "failure" ]; then
+            FAILED_TASK="APK Verification (verify_and_metadata)"
+            CAUSE_EXPLANATION="Gradle finished without producing a non-empty .apk file in app/build/outputs/apk/debug/."
+            CONCRETE_FIX="Verify that ':app' applies the 'com.android.application' plugin and that debug buildType is enabled in app/build.gradle.kts."
+          fi
+
+          echo "============================================================"
+          echo "NEXORA X — FAILURE DIAGNOSTIC REPORT"
+          echo "============================================================"
+          echo "Failing Task  : ${FAILED_TASK}"
+          echo "Root Cause    : ${CAUSE_EXPLANATION}"
+          echo "Suggested Fix : ${CONCRETE_FIX}"
+          echo "Artifact Note : No fake or incomplete APK was uploaded."
+          echo "============================================================"
+
+          {
+            echo "### NEXORA X Build Failed"
+            echo "- **Failing Task:** \`${FAILED_TASK}\`"
+            echo "- **Root Cause:** ${CAUSE_EXPLANATION}"
+            echo "- **Concrete Fix:** ${CONCRETE_FIX}"
+            echo "- **Artifact Safety:** Artifact upload was skipped so no incomplete or corrupted APK is published."
+          } >> "$GITHUB_STEP_SUMMARY"
