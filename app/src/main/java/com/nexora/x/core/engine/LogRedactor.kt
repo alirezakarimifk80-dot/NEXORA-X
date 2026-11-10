@@ -23,7 +23,7 @@ object LogRedactor {
         Regex("(?i)(\"(?:uuid|password|private_key|public_key|short_id|auth_str|token|secret)\"\\s*:\\s*\")([^\"]+)(\")")
 
     private val URL_QUERY_SECRET_REGEX =
-        Regex("(?i)([?&](?:token|key|password|secret|pbk|sid|id)=)([^&\\s\"']+)")
+        Regex("(?i)((?:[?&]|\\b)(?:token|key|password|secret|pbk|sid|id)=)([^&\\s\"']+)")
 
     /**
      * Redacts any sensitive credentials, UUIDs, keys, or proxy links from [rawMessage],

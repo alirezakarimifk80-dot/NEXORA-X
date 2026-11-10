@@ -144,14 +144,16 @@ jobs:
       - name: 8. Run Unit Tests (./gradlew testDebugUnitTest)
         id: unit_tests
         run: |
+          set -o pipefail
           echo "Running NEXORA X unit test suites (Phase 1, Phase 2, Phase 3)..."
-          ./gradlew testDebugUnitTest --stacktrace
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle-build.log
 
       - name: 9. Build Android Debug APK (./gradlew assembleDebug)
         id: assemble_debug
         run: |
+          set -o pipefail
           echo "Assembling NEXORA X Debug APK (:app:assembleDebug)..."
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee -a gradle-build.log
 
       - name: 10. Verify APK Output & Generate build-info.txt
         id: verify_and_metadata
