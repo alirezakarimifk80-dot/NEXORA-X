@@ -18,6 +18,8 @@ permissions:
 env:
   JAVA_VERSION: '17'
   GRADLE_VERSION: '8.9'
+  COMPILE_SDK: '35'
+  BUILD_TOOLS_VERSION: '35.0.0'
   APP_MODULE: ':app'
   APK_OUTPUT_DIR: 'app/build/outputs/apk/debug'
 
@@ -39,8 +41,59 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 3. Set Up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 3. Set Up Android SDK (API 35 & Build-Tools 35.0.0)
+        id: android_sdk_setup
+        run: |
+          set -euo pipefail
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "${SDK_ROOT}"
+          sudo chown -R "$USER:$USER" "${SDK_ROOT}" || true
+
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "sdk.dir=${SDK_ROOT}" > local.properties
+
+          # Locate pre-installed sdkmanager on GitHub Ubuntu runner without self-overwriting cmdline-tools/16.0
+          SDKMANAGER=""
+          if [ -x "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          else
+            FOUND_SDKM=$(find "${SDK_ROOT}/cmdline-tools" -maxdepth 3 -type f -name "sdkmanager" 2>/dev/null | sort -V | tail -n 1 || true)
+            if [ -n "${FOUND_SDKM}" ] && [ -x "${FOUND_SDKM}" ]; then
+              SDKMANAGER="${FOUND_SDKM}"
+            fi
+          fi
+
+          # Fallback: download official Android command-line tools only if no sdkmanager is present on the runner
+          if [ -z "${SDKMANAGER}" ]; then
+            echo "No pre-installed sdkmanager found; installing commandlinetools-linux-11076708_latest.zip..."
+            mkdir -p "${SDK_ROOT}/cmdline-tools"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+            unzip -q -o /tmp/cmdtools.zip -d "${SDK_ROOT}/cmdline-tools"
+            mv "${SDK_ROOT}/cmdline-tools/cmdline-tools" "${SDK_ROOT}/cmdline-tools/latest"
+            rm -f /tmp/cmdtools.zip
+            SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          echo "Using sdkmanager binary: ${SDKMANAGER}"
+          "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --version
+
+          # Accept all Android SDK licenses deterministically (both hash files and sdkmanager --licenses)
+          mkdir -p "${SDK_ROOT}/licenses"
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n" > "${SDK_ROOT}/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${SDK_ROOT}/licenses/android-sdk-preview-license"
+          yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" --licenses > /dev/null || true
+
+          # Install only the required Android SDK packages for NEXORA X (compileSdk = 35)
+          echo "Installing platform-tools, platforms;android-${COMPILE_SDK}, and build-tools;${BUILD_TOOLS_VERSION}..."
+          yes | "${SDKMANAGER}" --sdk_root="${SDK_ROOT}" \
+            "platform-tools" \
+            "platforms;android-${COMPILE_SDK}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+
+          echo "${SDK_ROOT}/platform-tools" >> "$GITHUB_PATH"
+          echo "${SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}" >> "$GITHUB_PATH"
 
       - name: 4. Configure Gradle 8.9 & Dependency Caching
         uses: gradle/actions/setup-gradle@v4
@@ -57,19 +110,29 @@ jobs:
             chmod +x ./gradlew
           fi
 
-      - name: 6. Run Unit Tests (./gradlew testDebugUnitTest)
+      - name: 6. Verify Gradle Version (./gradlew --version)
+        id: gradle_version
+        run: |
+          ./gradlew --version
+
+      - name: 7. Verify Gradle Tasks (./gradlew tasks)
+        id: gradle_tasks
+        run: |
+          ./gradlew tasks --all
+
+      - name: 8. Run Unit Tests (./gradlew testDebugUnitTest)
         id: unit_tests
         run: |
           echo "Running NEXORA X unit test suites (Phase 1, Phase 2, Phase 3)..."
           ./gradlew testDebugUnitTest --stacktrace
 
-      - name: 7. Build Android Debug APK (./gradlew assembleDebug)
+      - name: 9. Build Android Debug APK (./gradlew assembleDebug)
         id: assemble_debug
         run: |
           echo "Assembling NEXORA X Debug APK (:app:assembleDebug)..."
           ./gradlew assembleDebug --stacktrace
 
-      - name: 8. Verify APK Output & Generate build-info.txt
+      - name: 10. Verify APK Output & Generate build-info.txt
         id: verify_and_metadata
         run: |
           set -euo pipefail
@@ -137,7 +200,7 @@ jobs:
             echo "| **APK SHA-256** | \`${APK_SHA256}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 9. Upload NEXORA-X-APK Artifact (APK + build-info.txt)
+      - name: 11. Upload NEXORA-X-APK Artifact (APK + build-info.txt)
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -148,7 +211,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      - name: 10. Diagnose Build or Test Failure
+      - name: 12. Diagnose Build or Test Failure
         if: failure()
         run: |
           echo "::error::NEXORA X workflow failed. Inspecting failing stage and Gradle logs..."
@@ -156,14 +219,18 @@ jobs:
           CAUSE_EXPLANATION="A setup or Gradle initialization step failed before task execution."
           CONCRETE_FIX="Verify gradle/libs.versions.toml, JDK 17 setup, and network access to Google Maven / Maven Central."
 
-          if [ "${{ steps.unit_tests.outcome }}" == "failure" ]; then
+          if [ "${{ steps.android_sdk_setup.outcome }}" == "failure" ]; then
+            FAILED_TASK="3. Set Up Android SDK"
+            CAUSE_EXPLANATION="Android SDK package installation or license acceptance failed."
+            CONCRETE_FIX="Verify ANDROID_HOME permissions and availability of platforms;android-35 and build-tools;35.0.0."
+          elif [ "${{ steps.unit_tests.outcome }}" == "failure" ]; then
             FAILED_TASK=":app:testDebugUnitTest"
             CAUSE_EXPLANATION="One or more JUnit 4 unit tests in app/src/test/ failed, or test compilation encountered a Kotlin/KSP error."
-            CONCRETE_FIX="Inspect the stacktrace under step '6. Run Unit Tests' or app/build/reports/tests/testDebugUnitTest/index.html. Run './gradlew testDebugUnitTest --info' locally to reproduce."
+            CONCRETE_FIX="Inspect the stacktrace under step '8. Run Unit Tests' or app/build/reports/tests/testDebugUnitTest/index.html."
           elif [ "${{ steps.assemble_debug.outcome }}" == "failure" ]; then
             FAILED_TASK=":app:assembleDebug"
             CAUSE_EXPLANATION="Android Debug APK compilation, KSP (Room/Hilt) code generation, or resource packaging failed."
-            CONCRETE_FIX="Check step '7. Build Android Debug APK' for unresolved symbols, Room schema errors, or AndroidManifest.xml issues. Run './gradlew assembleDebug --stacktrace' locally."
+            CONCRETE_FIX="Check step '9. Build Android Debug APK' for unresolved symbols, Room schema errors, or AndroidManifest.xml issues."
           elif [ "${{ steps.verify_and_metadata.outcome }}" == "failure" ]; then
             FAILED_TASK="APK Verification (verify_and_metadata)"
             CAUSE_EXPLANATION="Gradle finished without producing a non-empty .apk file in app/build/outputs/apk/debug/."
