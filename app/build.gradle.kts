@@ -100,7 +100,7 @@ android {
 
 dependencies {
     // Official sing-box libbox gomobile Android Archive (app/libs/libbox.aar, sing-box v1.10.7)
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+    implementation(files("libs/libbox.aar"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

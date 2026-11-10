@@ -195,5 +195,22 @@ class SingBoxEngineAndConfigTest {
         assertEquals(EngineState.DISCONNECTED, engine.engineState.value)
     }
 
+    @Test
+    fun `Libbox v1_10_7 classes from app_libs_libbox_aar are present on classpath`() {
+        val libboxManager = LibboxManager(TestContextStub())
+        assertTrue(
+            "Expected io.nekohasekai.libbox.Libbox from app/libs/libbox.aar (v1.10.7) to be present on classpath",
+            libboxManager.isLibboxClassPresent()
+        )
+
+        val cl = LibboxManager::class.java.classLoader
+        assertNotNull(Class.forName("io.nekohasekai.libbox.Libbox", false, cl))
+        assertNotNull(Class.forName("io.nekohasekai.libbox.PlatformInterface", false, cl))
+        assertNotNull(Class.forName("io.nekohasekai.libbox.SetupOptions", false, cl))
+        assertNotNull(Class.forName("io.nekohasekai.libbox.BoxService", false, cl))
+        assertNotNull(Class.forName("go.Seq", false, cl))
+    }
+
     private class TestContextStub : android.content.ContextWrapper(null)
 }
+

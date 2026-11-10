@@ -23,3 +23,7 @@ captures/
 *.keystore
 keystore.properties
 signing.properties
+
+# Reproducibly generated native AAR binary (assembled via scripts/fetch-libbox-aar.sh)
+app/libs/*.aar
+
