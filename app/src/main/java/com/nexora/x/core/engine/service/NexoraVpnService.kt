@@ -26,13 +26,17 @@ import javax.inject.Inject
 /**
  * Native Android [VpnService] hosting the `sing-box` (`libbox`) engine and TUN file descriptor.
  *
- * Lifecycle & Security Guarantees:
+ * Lifecycle, Routing & File-Descriptor Ownership Guarantees:
  * - Declared non-exported (`android:exported="false"`) with `android.permission.BIND_VPN_SERVICE`.
- * - Establishes the virtual TUN interface via `VpnService.Builder` and prevents routing loops by
- *   excluding `packageName` (`addDisallowedApplication(packageName)`) and protecting outbound sockets
- *   via `protect(fd)`.
- * - Owns and closes the `ParcelFileDescriptor` idempotently on stop, revocation, or destruction.
- * - Monitors underlying network loss/restoration via `ConnectivityManager.NetworkCallback`.
+ * - Establishes the virtual TUN interface via `VpnService.Builder` in non-blocking mode (`setBlocking(false)`)
+ *   required by Go's runtime netpoller inside `libbox.so`.
+ * - Configures IPv4 address (`172.19.0.1/30`), IPv4 default route (`0.0.0.0/0`), and DNS servers
+ *   (`1.1.1.1` and TUN peer `172.19.0.2`), and prevents routing loops by excluding `packageName`
+ *   (`addDisallowedApplication(packageName)`) and protecting outbound sockets via `protect(fd)`.
+ * - Duplicates the TUN file descriptor via `ParcelFileDescriptor.dup(pfd.fileDescriptor).detachFd()`
+ *   before handing it to `libbox` so `BoxService.close()` owns its fd cleanly without double-close races.
+ * - Executes Phase 4 Stages D, E, and F connectivity probes after `libbox` starts and updates the
+ *   foreground notification to reflect `VPN_ACTIVE`, `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE`, or `NO_INTERNET`.
  */
 @AndroidEntryPoint
 class NexoraVpnService : VpnService(), NexoraTunPlatformCallbacks {
@@ -70,7 +74,13 @@ class NexoraVpnService : VpnService(), NexoraTunPlatformCallbacks {
                 serviceScope.launch {
                     try {
                         singBoxEngine.startPreparedSessionInService(this@NexoraVpnService)
-                        promoteToForeground(EngineState.CONNECTED)
+                        promoteToForeground(singBoxEngine.engineState.value)
+
+                        // Phase 4: Run real Stages D, E, and F connectivity verification
+                        singBoxEngine.verifyActiveTunnelConnectivity { outboundSocket ->
+                            protect(outboundSocket)
+                        }
+                        promoteToForeground(singBoxEngine.engineState.value)
                     } catch (_: Throwable) {
                         closeTunDescriptorSafely()
                         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -113,12 +123,18 @@ class NexoraVpnService : VpnService(), NexoraTunPlatformCallbacks {
     ): Int {
         closeTunDescriptorSafely()
 
+        val safeMtu = mtu.coerceIn(1280, 9000)
         val builder = Builder()
             .setSession("NEXORA X")
-            .setMtu(mtu.coerceIn(1280, 9000))
+            .setMtu(safeMtu)
+            .setBlocking(false)
             .addAddress(ipv4Address, ipv4Prefix)
             .addRoute("0.0.0.0", 0)
             .addDnsServer(dnsAddress)
+
+        if (ipv4Address == "172.19.0.1" && dnsAddress != "172.19.0.2") {
+            runCatching { builder.addDnsServer("172.19.0.2") }
+        }
 
         // Prevent routing loops by excluding NEXORA X's own process from the TUN capture
         runCatching {
@@ -135,8 +151,22 @@ class NexoraVpnService : VpnService(), NexoraTunPlatformCallbacks {
             )
 
         tunDescriptor = pfd
-        // Duplicate the file descriptor for libbox while keeping a reference for idempotent cleanup if needed
-        return pfd.fd
+
+        // Duplicate a dedicated file descriptor for libbox so Go's BoxService.close() owns its fd
+        // without double-closing NexoraVpnService's ParcelFileDescriptor.
+        val libboxFd = try {
+            ParcelFileDescriptor.dup(pfd.fileDescriptor).detachFd()
+        } catch (_: Throwable) {
+            pfd.fd
+        }
+
+        singBoxEngine.onTunInterfaceOpened(
+            fd = libboxFd,
+            mtu = safeMtu,
+            ipv4Address = ipv4Address,
+            ipv4Prefix = ipv4Prefix
+        )
+        return libboxFd
     }
 
     override fun onNativeCoreLog(message: String) {

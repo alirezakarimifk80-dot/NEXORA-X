@@ -1,6 +1,5 @@
 package com.nexora.x.core.engine
 
-import android.content.Intent
 import com.nexora.x.core.model.Profile
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,8 +7,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Clean Architecture Repository contract exposing the Phase 3 native `sing-box` engine state,
- * diagnostic snapshot, and lifecycle operations through Kotlin [StateFlow] and [SharedFlow].
+ * Clean Architecture Repository contract exposing the Phase 3 & Phase 4 native `sing-box` engine state,
+ * 6-stage diagnostic snapshot, and lifecycle operations through Kotlin [StateFlow] and [SharedFlow].
  */
 interface EngineRepository {
     val engineState: StateFlow<EngineState>
@@ -20,6 +19,7 @@ interface EngineRepository {
     fun onVpnPermissionResult(granted: Boolean)
     fun stopVpn()
     fun validateProfileConfiguration(profile: Profile): Result<SingBoxConfigGenerator.GeneratedSingBoxConfig>
+    suspend fun verifyActiveTunnelConnectivity(): TunnelStageDiagnostics
 }
 
 @Singleton
@@ -53,5 +53,9 @@ class EngineRepositoryImpl @Inject constructor(
         profile: Profile
     ): Result<SingBoxConfigGenerator.GeneratedSingBoxConfig> {
         return runCatching { configGenerator.generateAndValidate(profile) }
+    }
+
+    override suspend fun verifyActiveTunnelConnectivity(): TunnelStageDiagnostics {
+        return singBoxEngine.verifyActiveTunnelConnectivity()
     }
 }

@@ -8,30 +8,46 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Core Engine Lifecycle Abstraction & State Machine for NEXORA X Phase 3.
+ * Core Engine Lifecycle Abstraction & State Machine for NEXORA X Phase 3 & Phase 4.
  *
  * Enforces deterministic transitions across:
  * - [EngineState.DISCONNECTED]
  * - [EngineState.PREPARING]
  * - [EngineState.REQUESTING_PERMISSION]
  * - [EngineState.STARTING]
- * - [EngineState.CONNECTED]
+ * - [EngineState.VPN_ACTIVE] (Stages A, B, and C established)
+ * - [EngineState.CONNECTIVITY_CHECK] (Probing Stage D outbound, Stage E DNS, Stage F HTTP 204)
+ * - [EngineState.INTERNET_AVAILABLE] (All Stages A–F verified; real traffic passes through tunnel)
+ * - [EngineState.CONNECTED] (Alias state for active tunnel session compatibility)
+ * - [EngineState.NO_INTERNET] (Stages A–C up, but Stage D, E, or F failed — no internet traffic)
  * - [EngineState.STOPPING]
  * - [EngineState.ERROR]
  *
  * Prevents concurrent duplicate start/stop calls, validates configurations before requesting
- * VPN permission or starting the service, and applies [LogRedactor] to all diagnostic events.
+ * VPN permission or starting the service, tracks 6-stage connectivity diagnostics (Stages A–F),
+ * and applies [LogRedactor] to all diagnostic events.
  */
 @Singleton
 class SingBoxEngine @Inject constructor(
     private val configGenerator: SingBoxConfigGenerator,
-    private val libboxManager: LibboxManager
+    private val libboxManager: LibboxManager,
+    private val connectivityVerifier: TunnelConnectivityVerifier
 ) {
+    constructor(
+        configGenerator: SingBoxConfigGenerator,
+        libboxManager: LibboxManager
+    ) : this(
+        configGenerator = configGenerator,
+        libboxManager = libboxManager,
+        connectivityVerifier = TunnelConnectivityVerifier()
+    )
+
     private val _diagnostics = MutableStateFlow(
         EngineDiagnosticsSnapshot(
             engineVersion = libboxManager.queryEngineVersion(),
@@ -57,9 +73,9 @@ class SingBoxEngine @Inject constructor(
     private var preparedConfigJson: String? = null
 
     /**
-     * Step 1: Validates [profile] and generates the sing-box JSON configuration.
+     * Step 1: Validates [profile] and generates the sing-box v1.10.7 JSON configuration.
      * Transitions from `DISCONNECTED` or `ERROR` -> `PREPARING`.
-     * Ignores duplicate start requests when already `PREPARING`, `STARTING`, or `CONNECTED`.
+     * Ignores duplicate start requests when already `PREPARING`, `STARTING`, or `isTunnelRunning`.
      */
     fun prepareProfileForStart(profile: Profile?): Result<SingBoxConfigGenerator.GeneratedSingBoxConfig> {
         synchronized(startStopLock) {
@@ -96,7 +112,8 @@ class SingBoxEngine @Inject constructor(
                         activeProfileName = profile.displayName,
                         activeProtocol = profile.protocol.displayName,
                         lastValidationSummary = generated.redactedSummary,
-                        lastRedactedError = null
+                        lastRedactedError = null,
+                        stageDiagnostics = TunnelStageDiagnostics()
                     )
                 }
                 _events.tryEmit(
@@ -145,8 +162,32 @@ class SingBoxEngine @Inject constructor(
     }
 
     /**
+     * Records Stage B (`tunInterfaceEstablished = true`) when `NexoraVpnService.openTunInterface`
+     * establishes the non-blocking virtual interface via `VpnService.Builder.establish()`.
+     */
+    fun onTunInterfaceOpened(fd: Int, mtu: Int, ipv4Address: String, ipv4Prefix: Int) {
+        val cidr = "$ipv4Address/$ipv4Prefix"
+        appendDiagnosticLog("Stage B PASS: TUN interface established (fd=$fd, cidr=$cidr, mtu=$mtu)")
+        _diagnostics.update { current ->
+            current.copy(
+                stageDiagnostics = current.stageDiagnostics.copy(
+                    stageAVpnServiceStarted = true,
+                    stageBTunInterfaceEstablished = fd >= 0,
+                    tunFileDescriptor = fd,
+                    tunMtu = mtu,
+                    tunIpv4Cidr = cidr
+                )
+            )
+        }
+        _events.tryEmit(EngineEvent.TunInterfaceEstablished(fdNumber = fd, mtu = mtu, ipv4Address = cidr))
+    }
+
+    /**
      * Step 2: Called by [com.nexora.x.core.engine.service.NexoraVpnService] on a background dispatcher
      * once the foreground service is promoted and ready to establish the TUN interface and start `libbox`.
+     *
+     * Verifies Stages A, B, and C, transitioning to [EngineState.VPN_ACTIVE] once the native
+     * `BoxService` is running.
      */
     @Throws(EngineException::class)
     fun startPreparedSessionInService(callbacks: NexoraTunPlatformCallbacks) {
@@ -154,7 +195,7 @@ class SingBoxEngine @Inject constructor(
         val profile: Profile
         synchronized(startStopLock) {
             val current = _engineState.value
-            if (current == EngineState.CONNECTED || current == EngineState.STARTING) {
+            if (current.isTunnelRunning || current == EngineState.STARTING) {
                 return
             }
             configJson = preparedConfigJson ?: throw EngineException.InvalidConfigurationException(
@@ -163,15 +204,29 @@ class SingBoxEngine @Inject constructor(
             profile = preparedProfile ?: throw EngineException.InvalidConfigurationException(
                 "No active profile bound to engine session."
             )
-            transitionState(EngineState.STARTING, "Starting NexoraVpnService & libbox core")
-            _diagnostics.update { it.copy(serviceState = "STARTING_FOREGROUND") }
+            transitionState(EngineState.STARTING, "Stage A PASS: Starting NexoraVpnService & libbox core")
+            _diagnostics.update {
+                it.copy(
+                    serviceState = "STARTING_FOREGROUND",
+                    stageDiagnostics = TunnelStageDiagnostics(stageAVpnServiceStarted = true)
+                )
+            }
         }
 
         try {
             libboxManager.startNativeBoxService(configJson, callbacks)
             val now = System.currentTimeMillis()
             synchronized(startStopLock) {
-                transitionState(EngineState.CONNECTED, "Tunnel established for '${profile.displayName}'")
+                val stageBReady = _diagnostics.value.stageDiagnostics.stageBTunInterfaceEstablished
+                val updatedStages = _diagnostics.value.stageDiagnostics.copy(
+                    stageAVpnServiceStarted = true,
+                    stageBTunInterfaceEstablished = stageBReady,
+                    stageCSingBoxEngineRunning = true
+                )
+                transitionState(
+                    EngineState.VPN_ACTIVE,
+                    "Stage C PASS: sing-box BoxService running for '${profile.displayName}' (awaiting Stages D–F connectivity check)"
+                )
                 _diagnostics.update {
                     it.copy(
                         engineVersion = libboxManager.queryEngineVersion(),
@@ -179,7 +234,8 @@ class SingBoxEngine @Inject constructor(
                         isEngineInitialized = libboxManager.isInitialized(),
                         serviceState = "RUNNING_FOREGROUND",
                         connectedSinceEpochMillis = now,
-                        lastRedactedError = null
+                        lastRedactedError = null,
+                        stageDiagnostics = updatedStages
                     )
                 }
             }
@@ -202,6 +258,80 @@ class SingBoxEngine @Inject constructor(
             )
             throw err
         }
+    }
+
+    /**
+     * Step 3 (Phase 4): Executes real end-to-end connectivity verification across Stages D, E, and F
+     * while the VPN tunnel is active (`VPN_ACTIVE`, `CONNECTED`, `INTERNET_AVAILABLE`, or `NO_INTERNET`).
+     *
+     * Transitions:
+     * - `VPN_ACTIVE` -> `CONNECTIVITY_CHECK`
+     * - If Stages D, E, and F pass -> `INTERNET_AVAILABLE`
+     * - If Stages A–C are running (`VPN_ACTIVE`), but Stage D, E, or F fails -> `NO_INTERNET`
+     */
+    suspend fun verifyActiveTunnelConnectivity(
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): TunnelStageDiagnostics {
+        val activeProfile: Profile
+        val baseStages: TunnelStageDiagnostics
+        synchronized(startStopLock) {
+            val current = _engineState.value
+            val prof = preparedProfile
+            if (!current.isTunnelRunning || prof == null) {
+                return _diagnostics.value.stageDiagnostics
+            }
+            activeProfile = prof
+            baseStages = _diagnostics.value.stageDiagnostics.copy(
+                stageAVpnServiceStarted = true,
+                stageBTunInterfaceEstablished = true,
+                stageCSingBoxEngineRunning = true
+            )
+            transitionState(
+                EngineState.CONNECTIVITY_CHECK,
+                "Running Stages D–F connectivity probes for '${activeProfile.displayName}'..."
+            )
+        }
+
+        val verifiedStages = connectivityVerifier.verifyActiveTunnel(
+            profile = activeProfile,
+            baseStages = baseStages,
+            protectSocket = protectSocket
+        )
+
+        synchronized(startStopLock) {
+            val current = _engineState.value
+            if (!current.isTunnelRunning) {
+                return verifiedStages
+            }
+
+            if (verifiedStages.stageDRemoteOutboundWorking == true &&
+                verifiedStages.stageEDnsResolutionWorking == true &&
+                verifiedStages.stageFInternetConnectivityWorking == true
+            ) {
+                val summary =
+                    "Stages A–F PASS: Outbound ${verifiedStages.outboundHandshakeLatencyMs ?: 0}ms, DNS (${verifiedStages.resolvedDnsAddressesCount ?: 1} IP), HTTP ${verifiedStages.probeHttpStatusCode ?: 204}"
+                transitionState(EngineState.INTERNET_AVAILABLE, summary)
+                _diagnostics.update {
+                    it.copy(
+                        stageDiagnostics = verifiedStages,
+                        lastRedactedError = null
+                    )
+                }
+            } else {
+                val failReason = verifiedStages.failureReasonRedacted
+                    ?: "Tunnel is active (Stages A–C PASS), but internet traffic probe failed."
+                transitionState(EngineState.NO_INTERNET, failReason)
+                _diagnostics.update {
+                    it.copy(
+                        stageDiagnostics = verifiedStages,
+                        lastRedactedError = "[${verifiedStages.failureStageLabel ?: "NO_INTERNET"}] $failReason"
+                    )
+                }
+            }
+            _events.tryEmit(EngineEvent.ConnectivityVerificationCompleted(verifiedStages))
+        }
+
+        return verifiedStages
     }
 
     /**
@@ -229,6 +359,7 @@ class SingBoxEngine @Inject constructor(
                     it.copy(
                         serviceState = "STOPPED",
                         connectedSinceEpochMillis = null,
+                        stageDiagnostics = TunnelStageDiagnostics(),
                         trafficStats = EngineTrafficStatistics()
                     )
                 }
@@ -239,7 +370,7 @@ class SingBoxEngine @Inject constructor(
     }
 
     fun onTrafficStatisticsReceived(stats: EngineTrafficStatistics) {
-        if (_engineState.value != EngineState.CONNECTED) return
+        if (!_engineState.value.isTunnelRunning) return
         _diagnostics.update { it.copy(trafficStats = stats) }
         _events.tryEmit(EngineEvent.TrafficUpdated(stats))
     }
@@ -277,6 +408,11 @@ class SingBoxEngine @Inject constructor(
                     serviceState = "STOPPED_ON_ERROR",
                     connectedSinceEpochMillis = null,
                     lastRedactedError = "[$errorCode] $redacted",
+                    stageDiagnostics = it.stageDiagnostics.copy(
+                        stageCSingBoxEngineRunning = false,
+                        failureStageLabel = errorCode,
+                        failureReasonRedacted = redacted
+                    ),
                     trafficStats = EngineTrafficStatistics()
                 )
             }

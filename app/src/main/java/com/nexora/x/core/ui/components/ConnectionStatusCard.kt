@@ -24,7 +24,9 @@ import com.nexora.x.domain.model.ConnectionState
 
 /**
  * Displays the current tunnel connection status and engine state.
- * Overloaded to support both the Phase 3 [EngineState] state machine and the legacy [ConnectionState].
+ * Supports Phase 3 & Phase 4 [EngineState] state machine (`DISCONNECTED`, `PREPARING`,
+ * `REQUESTING_PERMISSION`, `STARTING`, `VPN_ACTIVE`, `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE`,
+ * `CONNECTED`, `NO_INTERNET`, `STOPPING`, `ERROR`) and the legacy [ConnectionState].
  */
 @Composable
 fun ConnectionStatusCard(
@@ -35,14 +37,20 @@ fun ConnectionStatusCard(
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val badgeColor = when (engineState) {
+        EngineState.INTERNET_AVAILABLE,
         EngineState.CONNECTED -> NexoraColors.StatusNominalEmerald
-        EngineState.ERROR -> NexoraColors.StatusErrorCrimson
+        EngineState.ERROR,
+        EngineState.NO_INTERNET -> NexoraColors.StatusErrorCrimson
+        EngineState.VPN_ACTIVE,
+        EngineState.CONNECTIVITY_CHECK,
         EngineState.PREPARING,
         EngineState.REQUESTING_PERMISSION,
         EngineState.STARTING,
         EngineState.STOPPING -> NexoraColors.StatusPendingAmber
         EngineState.DISCONNECTED -> colorScheme.secondary
     }
+
+    val isWarningOrError = engineState == EngineState.ERROR || engineState == EngineState.NO_INTERNET
 
     Column(
         modifier = modifier
@@ -51,7 +59,7 @@ fun ConnectionStatusCard(
             .background(colorScheme.surface)
             .border(
                 width = 1.dp,
-                color = if (engineState == EngineState.ERROR) NexoraColors.StatusErrorCrimson else colorScheme.outline,
+                color = if (isWarningOrError) NexoraColors.StatusErrorCrimson else colorScheme.outline,
                 shape = MaterialTheme.shapes.large
             )
             .padding(20.dp)
@@ -77,7 +85,7 @@ fun ConnectionStatusCard(
                     style = MaterialTheme.typography.headlineMedium.copy(
                         fontWeight = FontWeight.Bold
                     ),
-                    color = if (engineState == EngineState.ERROR) {
+                    color = if (isWarningOrError) {
                         NexoraColors.StatusErrorCrimson
                     } else {
                         colorScheme.onSurface

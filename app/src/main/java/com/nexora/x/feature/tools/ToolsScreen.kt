@@ -35,12 +35,14 @@ import com.nexora.x.domain.model.NetworkToolItem
 import com.nexora.x.domain.model.ToolAvailability
 
 /**
- * NEXORA X Phase 3 Diagnostics & Network Tools Screen.
+ * NEXORA X Phase 3 & Phase 4 Diagnostics & Network Tools Screen.
  *
  * Displays:
  * - Engine version (`sing-box 1.10.7`)
  * - Engine initialization state & native `libbox.aar` presence
- * - Current VPN state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `CONNECTED`, `STOPPING`, `ERROR`)
+ * - Current VPN state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `VPN_ACTIVE`,
+ *   `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE`, `NO_INTERNET`, `STOPPING`, `ERROR`)
+ * - 6-Stage Tunnel Connectivity Checklist (Stages A through F)
  * - Service state (`STOPPED`, `STARTING_FOREGROUND`, `RUNNING_FOREGROUND`, `STOPPED_ON_ERROR`)
  * - Last non-sensitive error (passed through [com.nexora.x.core.engine.LogRedactor])
  * - Configuration validation result & redacted diagnostic log buffer
@@ -51,6 +53,7 @@ fun ToolsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val diag = uiState.engineDiagnostics
+    val stages = diag.stageDiagnostics
     val colorScheme = MaterialTheme.colorScheme
 
     Column(
@@ -60,10 +63,10 @@ fun ToolsScreen(
     ) {
         NexoraTopBar(
             title = "DIAGNOSTICS & TOOLS",
-            subtitle = "SING-BOX LIBBOX ENGINE · REDACTED LOGS",
+            subtitle = "SING-BOX LIBBOX ENGINE · STAGES A–F",
             actions = {
                 PremiumButton(
-                    text = "Validate Config",
+                    text = if (diag.currentVpnState.isTunnelRunning) "Verify Tunnel" else "Validate Config",
                     icon = Icons.Outlined.CheckCircle,
                     onClick = viewModel::onValidateSelectedProfileClicked
                 )
@@ -103,6 +106,62 @@ fun ToolsScreen(
                             .clickable { viewModel.onDismissBanner() }
                     )
                 }
+            }
+
+            // Phase 4 Six-Stage Tunnel Connectivity Checklist (Stages A through F)
+            SectionHeader(
+                title = "TUNNEL CONNECTIVITY STAGES (A–F)",
+                trailingMetadata = diag.currentVpnState.displayTitle
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(colorScheme.surface)
+                    .border(1.dp, colorScheme.outline, MaterialTheme.shapes.medium)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                DiagnosticRow(
+                    "A. VPN SERVICE STARTED",
+                    if (stages.stageAVpnServiceStarted) "PASS (${diag.serviceState})" else "INACTIVE"
+                )
+                DiagnosticRow(
+                    "B. TUN INTERFACE ESTABLISHED",
+                    if (stages.stageBTunInterfaceEstablished) {
+                        "PASS (fd=${stages.tunFileDescriptor ?: "?"}, ${stages.tunIpv4Cidr ?: "172.19.0.1/30"})"
+                    } else {
+                        "INACTIVE"
+                    }
+                )
+                DiagnosticRow(
+                    "C. SING-BOX ENGINE RUNNING",
+                    if (stages.stageCSingBoxEngineRunning) "PASS (BoxService active)" else "INACTIVE"
+                )
+                DiagnosticRow(
+                    "D. REMOTE OUTBOUND CONNECTION",
+                    when (stages.stageDRemoteOutboundWorking) {
+                        true -> "PASS (${stages.outboundHandshakeLatencyMs ?: 0} ms)"
+                        false -> "FAIL (Unreachable / Refused)"
+                        null -> "PENDING"
+                    }
+                )
+                DiagnosticRow(
+                    "E. TUNNEL DNS RESOLUTION",
+                    when (stages.stageEDnsResolutionWorking) {
+                        true -> "PASS (${stages.resolvedDnsAddressesCount ?: 1} records)"
+                        false -> "FAIL (DNS timeout)"
+                        null -> "PENDING"
+                    }
+                )
+                DiagnosticRow(
+                    "F. ACTUAL INTERNET TRAFFIC",
+                    when (stages.stageFInternetConnectivityWorking) {
+                        true -> "PASS (HTTP ${stages.probeHttpStatusCode ?: 204})"
+                        false -> "FAIL (No tunnel internet)"
+                        null -> "PENDING"
+                    }
+                )
             }
 
             // Phase 3 Native sing-box Engine Diagnostics Panel

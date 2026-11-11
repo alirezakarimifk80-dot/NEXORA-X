@@ -63,7 +63,7 @@ class HomeViewModel @Inject constructor(
         startPeriodicLatencyMonitor()
     }
 
-    // Emits current epoch time every second so session duration updates ONLY while EngineState.CONNECTED
+    // Emits current epoch time every second so session duration updates ONLY while tunnel is active
     private val tickerFlow = flow {
         while (true) {
             emit(System.currentTimeMillis())
@@ -86,7 +86,7 @@ class HomeViewModel @Inject constructor(
         profileRepository.totalProfileCount,
         auxiliaryUiFlow
     ) { state, diag, selectedProfile, totalCount, (banner, nowMillis, latency) ->
-        val durationStr = if (state == EngineState.CONNECTED && diag.connectedSinceEpochMillis != null) {
+        val durationStr = if (state.isTunnelRunning && diag.connectedSinceEpochMillis != null) {
             val elapsedSec = ((nowMillis - diag.connectedSinceEpochMillis) / 1000L).coerceAtLeast(0L)
             val hours = elapsedSec / 3600L
             val mins = (elapsedSec % 3600L) / 60L
@@ -167,6 +167,9 @@ class HomeViewModel @Inject constructor(
                 host = profile.serverAddress,
                 port = profile.port
             )
+            if (uiState.value.engineState.isTunnelRunning) {
+                engineRepository.verifyActiveTunnelConnectivity()
+            }
         }
     }
 

@@ -18,7 +18,7 @@ import com.nexora.x.core.engine.EngineTrafficStatistics
  *
  * Displays:
  * - NEXORA X
- * - Actual connection state
+ * - Actual connection state (`STARTING`, `VPN ACTIVE`, `CONNECTIVITY CHECK`, `INTERNET AVAILABLE`, `NO INTERNET`)
  * - Selected profile display name (sanitized; never credentials or raw links)
  * - Actual traffic speeds if reported by `libbox`, or `N/A` when unavailable
  * - Stop VPN action button (`ACTION_STOP_VPN`) that genuinely stops the service and engine
@@ -86,7 +86,7 @@ object VpnNotificationManager {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(contentText)
-            .setOngoing(state == EngineState.STARTING || state == EngineState.CONNECTED)
+            .setOngoing(state == EngineState.STARTING || state.isTunnelRunning)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

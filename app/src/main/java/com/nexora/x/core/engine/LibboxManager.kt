@@ -12,6 +12,8 @@ import io.nekohasekai.libbox.BoxService
 import io.nekohasekai.libbox.CommandClient
 import io.nekohasekai.libbox.CommandClientHandler
 import io.nekohasekai.libbox.CommandClientOptions
+import io.nekohasekai.libbox.CommandServer
+import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.Connections
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.Libbox
@@ -23,6 +25,7 @@ import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SetupOptions
 import io.nekohasekai.libbox.StatusMessage
 import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
 import io.nekohasekai.libbox.WIFIState
 import java.io.File
@@ -75,10 +78,12 @@ interface NexoraTunPlatformCallbacks {
  *
  * Truthfulness & Binary Verification:
  * - Directly binds against `io.nekohasekai.libbox.Libbox`, `SetupOptions`, `PlatformInterface`,
- *   `BoxService`, and `go.Seq` from `app/libs/libbox.aar` (`v1.10.7`).
+ *   `BoxService`, `CommandServer`, `CommandClient`, and `go.Seq` from `app/libs/libbox.aar` (`v1.10.7`).
  * - Verifies both Java class presence (`io.nekohasekai.libbox.Libbox`) and native JNI linkage
  *   (`libbox.so` via `go.Seq` / `Libbox`).
  * - Runs `Libbox.setup(SetupOptions)` only once per process using [initialized].
+ * - Starts `CommandServer` and binds `commandServer.setService(boxService)` so `CommandClient`
+ *   streams real traffic counters (`uplink`, `downlink`, `uplinkTotal`, `downlinkTotal`).
  * - Never hides native initialization or `UnsatisfiedLinkError` failures, and redacts all logs
  *   through [LogRedactor] so credentials/UUIDs/passwords are never printed.
  */
@@ -96,6 +101,9 @@ class LibboxManager @Inject constructor(
 
     private val initialized = AtomicBoolean(false)
     private val setupLock = Any()
+
+    @Volatile
+    private var activeCommandServer: CommandServer? = null
 
     @Volatile
     private var activeBoxService: BoxService? = null
@@ -145,6 +153,8 @@ class LibboxManager @Inject constructor(
     }
 
     fun isInitialized(): Boolean = initialized.get()
+
+    fun isBoxServiceRunning(): Boolean = activeBoxService != null
 
     /**
      * Queries `Libbox.version()` when `libbox.aar` and `libbox.so` are loaded, or returns an
@@ -242,7 +252,8 @@ class LibboxManager @Inject constructor(
 
     /**
      * Instantiates and starts `io.nekohasekai.libbox.BoxService` via
-     * `Libbox.newService(configJson, platformInterface)` (sing-box v1.10.7 API).
+     * `Libbox.newService(configJson, platformInterface)` (sing-box v1.10.7 API), and binds
+     * `CommandServer` + `CommandClient` for live traffic telemetry.
      */
     @Synchronized
     @Throws(EngineException::class)
@@ -256,16 +267,38 @@ class LibboxManager @Inject constructor(
         stopNativeBoxService()
 
         try {
+            val commandServer = runCatching {
+                val serverHandler = object : CommandServerHandler {
+                    override fun serviceReload() {}
+                    override fun postServiceClose() {}
+                    override fun getSystemProxyStatus(): SystemProxyStatus {
+                        return SystemProxyStatus().apply {
+                            setAvailable(false)
+                            setEnabled(false)
+                        }
+                    }
+                    override fun setSystemProxyEnabled(isEnabled: Boolean) {}
+                }
+                Libbox.newCommandServer(serverHandler, 300)?.also { it.start() }
+            }.getOrNull()
+            activeCommandServer = commandServer
+
             val platformInterface = createPlatformInterface(callbacks)
             val boxService = Libbox.newService(configJson, platformInterface)
                 ?: throw EngineException.RuntimeExecutionException("Libbox.newService returned null.")
 
             boxService.start()
             activeBoxService = boxService
+
+            runCatching {
+                commandServer?.setService(boxService)
+            }
             startTrafficStatusClientIfSupported(callbacks)
         } catch (e: EngineException) {
+            stopNativeBoxService()
             throw e
         } catch (e: Throwable) {
+            stopNativeBoxService()
             val cause = e.cause ?: e
             throw EngineException.RuntimeExecutionException(
                 "Failed to start libbox BoxService: ${cause.message ?: cause.javaClass.simpleName}",
@@ -275,7 +308,7 @@ class LibboxManager @Inject constructor(
     }
 
     /**
-     * Stops and closes the active `io.nekohasekai.libbox.BoxService` instance idempotently.
+     * Stops and closes the active `io.nekohasekai.libbox.BoxService` and `CommandServer` idempotently.
      */
     @Synchronized
     fun stopNativeBoxService() {
@@ -285,9 +318,21 @@ class LibboxManager @Inject constructor(
             runCatching { statusClient.disconnect() }
         }
 
-        val service = activeBoxService ?: return
+        val commandServer = activeCommandServer
+        activeCommandServer = null
+        if (commandServer != null) {
+            runCatching { commandServer.setService(null) }
+        }
+
+        val service = activeBoxService
         activeBoxService = null
-        runCatching { service.close() }
+        if (service != null) {
+            runCatching { service.close() }
+        }
+
+        if (commandServer != null) {
+            runCatching { commandServer.close() }
+        }
     }
 
     private fun startTrafficStatusClientIfSupported(callbacks: NexoraTunPlatformCallbacks) {

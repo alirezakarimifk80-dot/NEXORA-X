@@ -34,6 +34,10 @@ sealed interface EngineEvent {
         val ipv4Address: String
     ) : EngineEvent
 
+    data class ConnectivityVerificationCompleted(
+        val stages: TunnelStageDiagnostics
+    ) : EngineEvent
+
     data class TrafficUpdated(
         val statistics: EngineTrafficStatistics
     ) : EngineEvent

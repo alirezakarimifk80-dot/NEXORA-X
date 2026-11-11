@@ -8,13 +8,28 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Generates and validates `sing-box` v1.10.x JSON configurations from saved Phase 2 [Profile] records.
+ * Generates and validates `sing-box` v1.10.7 JSON configurations from saved Phase 2 [Profile] records.
  *
  * Supported protocols:
  * - VLESS (`vless`)
  * - VMess (`vmess`)
  * - Trojan (`trojan`)
  * - Shadowsocks (`shadowsocks`)
+ *
+ * Phase 4 Connectivity & Routing Fixes (sing-box v1.10.7 schema):
+ * 1. DNS Bootstrap Rule (`"rules": [{ "outbound": "any", "server": "dns-direct" }]`):
+ *    Prevents the circular DNS deadlock where sing-box attempts to resolve the proxy server's
+ *    own hostname using `"final": "dns-remote"` (which detours through `"proxy"` before `"proxy"`
+ *    can connect).
+ * 2. Direct DNS Resolver (`"dns-direct"` -> `"address": "1.1.1.1"`, `"detour": "direct"`):
+ *    Replaces `"address": "local"` which fails on Android when `LocalDNSTransport` is not registered,
+ *    and sets `"address_resolver": "dns-direct"` on `"dns-remote"`.
+ * 3. Userspace TUN Stack (`"stack": "gvisor"`):
+ *    Fixes the Android kernel UID loopback blackhole that occurs when `"stack": "system"` is combined
+ *    with `VpnService.Builder.addDisallowedApplication(packageName)`.
+ * 4. Route Rules:
+ *    Routes `"protocol": "dns"` to `"dns-out"` and `"ip_is_private": true` to `"direct"`, with
+ *    `"final": "proxy"` and `"auto_detect_interface": true`.
  *
  * Security & Correctness Invariants:
  * - Never replaces missing credentials with fake/default secrets.
@@ -58,16 +73,26 @@ class SingBoxConfigGenerator @Inject constructor() {
             append("      {\n")
             append("        \"tag\": \"dns-remote\",\n")
             append("        \"address\": \"https://1.1.1.1/dns-query\",\n")
+            append("        \"address_resolver\": \"dns-direct\",\n")
+            append("        \"strategy\": \"prefer_ipv4\",\n")
             append("        \"detour\": \"proxy\"\n")
             append("      },\n")
             append("      {\n")
             append("        \"tag\": \"dns-direct\",\n")
-            append("        \"address\": \"local\",\n")
+            append("        \"address\": \"1.1.1.1\",\n")
+            append("        \"strategy\": \"prefer_ipv4\",\n")
             append("        \"detour\": \"direct\"\n")
             append("      }\n")
             append("    ],\n")
+            append("    \"rules\": [\n")
+            append("      {\n")
+            append("        \"outbound\": \"any\",\n")
+            append("        \"server\": \"dns-direct\"\n")
+            append("      }\n")
+            append("    ],\n")
             append("    \"final\": \"dns-remote\",\n")
-            append("    \"strategy\": \"prefer_ipv4\"\n")
+            append("    \"strategy\": \"prefer_ipv4\",\n")
+            append("    \"independent_cache\": true\n")
             append("  },\n")
             append("  \"inbounds\": [\n")
             append("    {\n")
@@ -78,16 +103,18 @@ class SingBoxConfigGenerator @Inject constructor() {
             append("      \"mtu\": 1500,\n")
             append("      \"auto_route\": true,\n")
             append("      \"strict_route\": true,\n")
-            append("      \"stack\": \"system\",\n")
+            append("      \"stack\": \"gvisor\",\n")
             append("      \"sniff\": true,\n")
-            append("      \"sniff_override_destination\": false\n")
+            append("      \"sniff_override_destination\": false,\n")
+            append("      \"domain_strategy\": \"prefer_ipv4\"\n")
             append("    }\n")
             append("  ],\n")
             append("  \"outbounds\": [\n")
             append(outboundJson.prependIndent("    ")).append(",\n")
             append("    {\n")
             append("      \"type\": \"direct\",\n")
-            append("      \"tag\": \"direct\"\n")
+            append("      \"tag\": \"direct\",\n")
+            append("      \"domain_strategy\": \"prefer_ipv4\"\n")
             append("    },\n")
             append("    {\n")
             append("      \"type\": \"dns\",\n")
@@ -105,6 +132,10 @@ class SingBoxConfigGenerator @Inject constructor() {
             append("      {\n")
             append("        \"protocol\": \"dns\",\n")
             append("        \"outbound\": \"dns-out\"\n")
+            append("      },\n")
+            append("      {\n")
+            append("        \"ip_is_private\": true,\n")
+            append("        \"outbound\": \"direct\"\n")
             append("      }\n")
             append("    ]\n")
             append("  }\n")
@@ -114,7 +145,7 @@ class SingBoxConfigGenerator @Inject constructor() {
         val net = profile.transportConfig.networkType.lowercase().ifBlank { "tcp" }
         val sec = profile.tlsConfig.securityMode.lowercase().ifBlank { "none" }
         val summary =
-            "VALIDATED · ${profile.protocol.displayName} -> ${profile.serverAddress}:${profile.port} (transport=$net, security=$sec, tun=172.19.0.1/30, mtu=1500)"
+            "VALIDATED · ${profile.protocol.displayName} -> ${profile.serverAddress}:${profile.port} (transport=$net, security=$sec, stack=gvisor, dns=bootstrap+doh, tun=172.19.0.1/30)"
 
         return GeneratedSingBoxConfig(
             rawJson = fullJson,
@@ -207,7 +238,8 @@ class SingBoxConfigGenerator @Inject constructor() {
                 sb.append("  \"tag\": \"proxy\",\n")
                 sb.append("  \"server\": \"${esc(profile.serverAddress.trim())}\",\n")
                 sb.append("  \"server_port\": ${profile.port},\n")
-                sb.append("  \"uuid\": \"${esc(profile.credential.trim())}\"")
+                sb.append("  \"uuid\": \"${esc(profile.credential.trim())}\",\n")
+                sb.append("  \"packet_encoding\": \"xudp\"")
                 if (profile.transportConfig.flow.isNotBlank()) {
                     sb.append(",\n  \"flow\": \"${esc(profile.transportConfig.flow.trim())}\"")
                 }
@@ -219,7 +251,8 @@ class SingBoxConfigGenerator @Inject constructor() {
                 sb.append("  \"server_port\": ${profile.port},\n")
                 sb.append("  \"uuid\": \"${esc(profile.credential.trim())}\",\n")
                 sb.append("  \"security\": \"${esc(profile.securityMethod.ifBlank { "auto" })}\",\n")
-                sb.append("  \"alter_id\": ${profile.alterId}")
+                sb.append("  \"alter_id\": ${profile.alterId},\n")
+                sb.append("  \"packet_encoding\": \"xudp\"")
             }
             ProfileType.TROJAN -> {
                 sb.append("  \"type\": \"trojan\",\n")

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ToolsUiState(
@@ -64,7 +65,18 @@ class ToolsViewModel @Inject constructor(
         result.fold(
             onSuccess = { generated ->
                 _configPreviewRedacted.value = generated.redactedSummary
-                _localBanner.value = "Configuration validated for '${profile.displayName}'."
+                if (uiState.value.engineDiagnostics.currentVpnState.isTunnelRunning) {
+                    viewModelScope.launch {
+                        val stages = engineRepository.verifyActiveTunnelConnectivity()
+                        _localBanner.value = if (stages.stageFInternetConnectivityWorking == true) {
+                            "Config validated & Stages A–F PASS (HTTP ${stages.probeHttpStatusCode ?: 204})."
+                        } else {
+                            "Config validated, but tunnel check reported: ${stages.failureReasonRedacted ?: "NO_INTERNET"}"
+                        }
+                    }
+                } else {
+                    _localBanner.value = "Configuration validated for '${profile.displayName}'."
+                }
             },
             onFailure = { err ->
                 _configPreviewRedacted.value = "INVALID: ${err.message}"

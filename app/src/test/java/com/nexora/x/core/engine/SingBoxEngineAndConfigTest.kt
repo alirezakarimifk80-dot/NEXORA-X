@@ -1,6 +1,5 @@
 package com.nexora.x.core.engine
 
-import android.content.Context
 import com.nexora.x.core.model.Profile
 import com.nexora.x.core.model.ProfileType
 import com.nexora.x.core.model.TlsConfig
@@ -13,12 +12,15 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Phase 3 Unit Test Suite covering:
- * - [SingBoxConfigGenerator]: VLESS, VMess, Trojan, and Shadowsocks protocol mapping
- * - Invalid profile rejection before engine start
- * - [LogRedactor]: UUID, password, Reality key, and URI link redaction
- * - [SingBoxEngine]: Deterministic state machine transitions, duplicate start/stop prevention,
- *   VPN permission denial handling, and missing `libbox.aar` error handling.
+ * Phase 3 & Phase 4 Unit Test Suite covering:
+ * - [SingBoxConfigGenerator]: VLESS, VMess, Trojan, and Shadowsocks protocol mapping,
+ *   DNS bootstrap rule (`"outbound": "any", "server": "dns-direct"`), `"address_resolver": "dns-direct"`,
+ *   `"stack": "gvisor"`, and `"packet_encoding": "xudp"`.
+ * - Invalid profile rejection before engine start.
+ * - [LogRedactor]: UUID, password, Reality key, and URI link redaction.
+ * - [SingBoxEngine]: Deterministic state machine transitions (`DISCONNECTED`, `PREPARING`,
+ *   `REQUESTING_PERMISSION`, `STARTING`, `VPN_ACTIVE`, `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE`,
+ *   `NO_INTERNET`, `STOPPING`, `ERROR`), duplicate start/stop prevention, andStage B tracking.
  */
 class SingBoxEngineAndConfigTest {
 
@@ -30,7 +32,7 @@ class SingBoxEngineAndConfigTest {
     }
 
     @Test
-    fun `SingBoxConfigGenerator maps VLESS Reality and XTLS flow to valid sing-box JSON`() {
+    fun `SingBoxConfigGenerator maps VLESS Reality and XTLS flow with Phase 4 DNS bootstrap and gvisor stack`() {
         val profile = Profile(
             id = "p-vless-1",
             displayName = "Tokyo Reality Node",
@@ -58,9 +60,17 @@ class SingBoxEngineAndConfigTest {
         val generated = configGenerator.generateAndValidate(profile)
         assertTrue(generated.rawJson.contains("\"type\": \"vless\""))
         assertTrue(generated.rawJson.contains("\"flow\": \"xtls-rprx-vision\""))
+        assertTrue(generated.rawJson.contains("\"packet_encoding\": \"xudp\""))
         assertTrue(generated.rawJson.contains("\"public_key\": \"RealPubKey998877\""))
         assertTrue(generated.rawJson.contains("\"short_id\": \"01ab\""))
         assertTrue(generated.rawJson.contains("\"type\": \"tun\""))
+
+        // Phase 4 connectivity invariants: gvisor stack + DNS bootstrap rule + direct DNS resolver
+        assertTrue(generated.rawJson.contains("\"stack\": \"gvisor\""))
+        assertTrue(generated.rawJson.contains("\"address_resolver\": \"dns-direct\""))
+        assertTrue(generated.rawJson.contains("\"outbound\": \"any\""))
+        assertTrue(generated.rawJson.contains("\"server\": \"dns-direct\""))
+        assertTrue(generated.rawJson.contains("\"ip_is_private\": true"))
 
         // Redacted summary must NEVER contain the UUID or Reality public key
         assertFalse(generated.redactedSummary.contains("b831381d-6324-4d53-ad4f-8cda48b30811"))
@@ -85,6 +95,7 @@ class SingBoxEngineAndConfigTest {
         val vmessConfig = configGenerator.generateAndValidate(vmessProfile)
         assertTrue(vmessConfig.rawJson.contains("\"type\": \"vmess\""))
         assertTrue(vmessConfig.rawJson.contains("\"path\": \"/vmess\""))
+        assertTrue(vmessConfig.rawJson.contains("\"packet_encoding\": \"xudp\""))
 
         val trojanProfile = Profile(
             id = "p-trojan",
@@ -149,13 +160,14 @@ class SingBoxEngineAndConfigTest {
     }
 
     @Test
-    fun `SingBoxEngine state machine prevents duplicate starts and handles permission denial and missing libbox cleanly`() {
+    fun `SingBoxEngine state machine prevents duplicate starts and tracks Phase 4 Stage B and permission denial`() {
         val engine = SingBoxEngine(
             configGenerator = configGenerator,
             libboxManager = LibboxManager(TestContextStub())
         )
 
         assertEquals(EngineState.DISCONNECTED, engine.engineState.value)
+        assertFalse(engine.engineState.value.isTunnelRunning)
 
         // 1. Attempting to start with null profile transitions to ERROR
         val nullResult = engine.prepareProfileForStart(null)
@@ -183,6 +195,11 @@ class SingBoxEngineAndConfigTest {
         val duplicateStart = engine.prepareProfileForStart(validProfile)
         assertTrue(duplicateStart.isFailure)
 
+        // Stage B tracking records TUN file descriptor and CIDR
+        engine.onTunInterfaceOpened(fd = 42, mtu = 1500, ipv4Address = "172.19.0.1", ipv4Prefix = 30)
+        assertTrue(engine.diagnostics.value.stageDiagnostics.stageBTunInterfaceEstablished)
+        assertEquals("172.19.0.1/30", engine.diagnostics.value.stageDiagnostics.tunIpv4Cidr)
+
         // Request VPN permission -> Denial transitions to ERROR
         engine.onVpnPermissionRequestLaunched()
         assertEquals(EngineState.REQUESTING_PERMISSION, engine.engineState.value)
@@ -193,6 +210,19 @@ class SingBoxEngineAndConfigTest {
         // Stop session resets cleanly to DISCONNECTED
         engine.stopSession("Reset after test")
         assertEquals(EngineState.DISCONNECTED, engine.engineState.value)
+        assertFalse(engine.diagnostics.value.stageDiagnostics.stageBTunInterfaceEstablished)
+    }
+
+    @Test
+    fun `Phase 4 EngineState tunnel running flags cover VPN_ACTIVE, CONNECTIVITY_CHECK, INTERNET_AVAILABLE, and NO_INTERNET`() {
+        assertTrue(EngineState.VPN_ACTIVE.isTunnelRunning)
+        assertTrue(EngineState.CONNECTIVITY_CHECK.isTunnelRunning)
+        assertTrue(EngineState.INTERNET_AVAILABLE.isTunnelRunning)
+        assertTrue(EngineState.CONNECTED.isTunnelRunning)
+        assertTrue(EngineState.NO_INTERNET.isTunnelRunning)
+        assertFalse(EngineState.DISCONNECTED.isTunnelRunning)
+        assertFalse(EngineState.STARTING.isTunnelRunning)
+        assertFalse(EngineState.ERROR.isTunnelRunning)
     }
 
     @Test
@@ -208,9 +238,9 @@ class SingBoxEngineAndConfigTest {
         assertNotNull(Class.forName("io.nekohasekai.libbox.PlatformInterface", false, cl))
         assertNotNull(Class.forName("io.nekohasekai.libbox.SetupOptions", false, cl))
         assertNotNull(Class.forName("io.nekohasekai.libbox.BoxService", false, cl))
+        assertNotNull(Class.forName("io.nekohasekai.libbox.CommandServer", false, cl))
         assertNotNull(Class.forName("go.Seq", false, cl))
     }
 
     private class TestContextStub : android.content.ContextWrapper(null)
 }
-

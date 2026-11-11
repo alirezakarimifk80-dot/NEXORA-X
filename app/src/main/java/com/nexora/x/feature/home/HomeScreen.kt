@@ -24,7 +24,6 @@ import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.FolderSpecial
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Speed
@@ -55,15 +54,16 @@ import com.nexora.x.core.ui.components.TrafficMetricCard
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * NEXORA X Phase 3 Home Dashboard Screen.
+ * NEXORA X Phase 3 & Phase 4 Home Dashboard Screen.
  * Connected to the real [com.nexora.x.core.engine.SingBoxEngine], [com.nexora.x.core.engine.NetworkLatencyChecker],
  * and Room [com.nexora.x.domain.repository.ProfileRepository].
  *
  * Displays:
  * - Selected profile name & protocol
  * - Periodic & on-demand TCP handshake LATENCY (`ms`, `Checking...`, `Timeout`, or `N/A`)
- * - Real connection state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `CONNECTED`, `STOPPING`, `ENGINE ERROR`)
- * - Connection duration (`00:00:00` or live elapsed time when `CONNECTED`)
+ * - Real connection state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `VPN ACTIVE`,
+ *   `CONNECTIVITY CHECK`, `INTERNET AVAILABLE`, `NO INTERNET`, `STOPPING`, `ENGINE ERROR`)
+ * - Connection duration (`00:00:00` or live elapsed time when tunnel is active)
  * - Download speed, Upload speed, Total downloaded data, Total uploaded data (`N/A` when unavailable; never fabricated)
  * - Connect & Disconnect controls wired to Android `VpnService.prepare()` consent launcher
  */
@@ -78,6 +78,7 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val colorScheme = MaterialTheme.colorScheme
     val selectedProfile = uiState.selectedProfile
+    val stages = uiState.diagnostics.stageDiagnostics
 
     // Android 13+ (API 33+) runtime notification permission launcher for Foreground VpnService notification
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -107,8 +108,14 @@ fun HomeScreen(
         EngineState.DISCONNECTED -> "No active VPN session. Select a saved profile and tap Connect to validate and start sing-box."
         EngineState.PREPARING -> "Validating profile and generating sing-box v1.10.7 JSON configuration..."
         EngineState.REQUESTING_PERMISSION -> "Waiting for Android VpnService user consent..."
-        EngineState.STARTING -> "Promoting foreground service, opening TUN interface, and starting libbox..."
+        EngineState.STARTING -> "Promoting foreground service, opening non-blocking TUN interface, and starting libbox..."
+        EngineState.VPN_ACTIVE -> "Stages A–C UP: TUN & sing-box running for '${selectedProfile?.displayName ?: "Profile"}'. Starting traffic check..."
+        EngineState.CONNECTIVITY_CHECK -> "Probing Stage D (outbound handshake), Stage E (tunnel DNS), and Stage F (HTTP 204 connectivity)..."
+        EngineState.INTERNET_AVAILABLE -> "All Stages A–F VERIFIED: Internet traffic is passing through '${selectedProfile?.displayName ?: "Profile"}' (HTTP ${stages.probeHttpStatusCode ?: 204})."
         EngineState.CONNECTED -> "Active sing-box TUN session established for '${selectedProfile?.displayName ?: "Profile"}'."
+        EngineState.NO_INTERNET -> stages.failureReasonRedacted
+            ?: uiState.diagnostics.lastRedactedError
+            ?: "Tunnel is up (Stages A–C PASS), but no internet traffic passed through the remote outbound."
         EngineState.STOPPING -> "Closing TUN file descriptor and stopping libbox service..."
         EngineState.ERROR -> uiState.diagnostics.lastRedactedError
             ?: "Engine encountered an error. Inspect Network Tools -> Diagnostics for details."
@@ -121,7 +128,7 @@ fun HomeScreen(
     ) {
         NexoraTopBar(
             title = AppConstants.APP_NAME,
-            subtitle = "PHASE 3 · ${uiState.engineState.displayTitle} · ${uiState.totalSavedProfiles} PROFILES",
+            subtitle = "PHASE 4 · ${uiState.engineState.displayTitle} · ${uiState.totalSavedProfiles} PROFILES",
             actions = {
                 PremiumButton(
                     text = if (uiState.engineState.canStop) "Disconnect" else "Add Profile",
@@ -146,7 +153,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             if (uiState.actionBannerMessage != null) {
-                val isError = uiState.engineState == EngineState.ERROR
+                val isError = uiState.engineState == EngineState.ERROR || uiState.engineState == EngineState.NO_INTERNET
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -257,7 +264,7 @@ fun HomeScreen(
             // Real Engine Traffic Statistics (Displays N/A when no libbox session is reporting)
             SectionHeader(
                 title = "ENGINE TRAFFIC TELEMETRY",
-                trailingMetadata = if (uiState.engineState == EngineState.CONNECTED) "LIVE LIBBOX STREAM" else "NO ACTIVE SESSION"
+                trailingMetadata = if (uiState.engineState.isTunnelRunning) "LIVE LIBBOX STREAM" else "NO ACTIVE SESSION"
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
