@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.FolderSpecial
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -55,10 +56,12 @@ import kotlinx.coroutines.flow.collectLatest
 
 /**
  * NEXORA X Phase 3 Home Dashboard Screen.
- * Connected to the real [com.nexora.x.core.engine.SingBoxEngine] and Room [com.nexora.x.domain.repository.ProfileRepository].
+ * Connected to the real [com.nexora.x.core.engine.SingBoxEngine], [com.nexora.x.core.engine.NetworkLatencyChecker],
+ * and Room [com.nexora.x.domain.repository.ProfileRepository].
  *
  * Displays:
  * - Selected profile name & protocol
+ * - Periodic & on-demand TCP handshake LATENCY (`ms`, `Checking...`, `Timeout`, or `N/A`)
  * - Real connection state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `CONNECTED`, `STOPPING`, `ENGINE ERROR`)
  * - Connection duration (`00:00:00` or live elapsed time when `CONNECTED`)
  * - Download speed, Upload speed, Total downloaded data, Total uploaded data (`N/A` when unavailable; never fabricated)
@@ -199,9 +202,9 @@ fun HomeScreen(
                 )
             }
 
-            // Selected Profile & Protocol Summary
+            // Selected Profile, Protocol & Live Latency Summary
             SectionHeader(
-                title = "SELECTED PROFILE & PROTOCOL",
+                title = "SELECTED PROFILE & LATENCY",
                 trailingMetadata = selectedProfile?.protocol?.badgeLabel ?: "NONE SELECTED"
             )
             Row(
@@ -209,12 +212,20 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 TrafficMetricCard(
-                    label = "SAVED PROFILES",
-                    value = "${uiState.totalSavedProfiles}",
-                    caption = "Room SQLite Records",
-                    icon = Icons.Outlined.FolderSpecial,
+                    label = "LATENCY",
+                    value = uiState.latencyFormatted,
+                    caption = if (selectedProfile != null) {
+                        "${selectedProfile.serverAddress}:${selectedProfile.port} · Tap to ping"
+                    } else {
+                        "Select profile to ping"
+                    },
+                    icon = Icons.Outlined.Speed,
                     accentColor = NexoraColors.CyanHighlight,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = selectedProfile != null) {
+                            viewModel.onRefreshLatencyClicked()
+                        }
                 )
                 TrafficMetricCard(
                     label = "SELECTED PROTOCOL",

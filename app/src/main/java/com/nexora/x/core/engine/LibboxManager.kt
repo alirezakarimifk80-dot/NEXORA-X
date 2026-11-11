@@ -6,7 +6,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
-import android.system.OsConstants
 import dagger.hilt.android.qualifiers.ApplicationContext
 import go.Seq
 import io.nekohasekai.libbox.BoxService
@@ -106,6 +105,13 @@ class LibboxManager @Inject constructor(
 
     private val networkCallbacks = ConcurrentHashMap<InterfaceUpdateListener, ConnectivityManager.NetworkCallback>()
 
+    private fun isAndroidRuntime(): Boolean {
+        val vmName = System.getProperty("java.vm.name") ?: ""
+        val vendor = System.getProperty("java.vendor") ?: ""
+        return vmName.contains("Dalvik", ignoreCase = true) ||
+            vendor.contains("Android", ignoreCase = true)
+    }
+
     /**
      * Checks whether the `io.nekohasekai.libbox.Libbox` class bytecode from `libbox.aar` is present
      * on the classpath without triggering static JNI `<clinit>` initialization.
@@ -121,10 +127,11 @@ class LibboxManager @Inject constructor(
 
     /**
      * Checks whether `io.nekohasekai.libbox.Libbox` AND its native JNI library (`libbox.so`)
-     * can be loaded and linked in the current runtime environment.
+     * can be loaded and linked in the current Android runtime environment.
      */
     fun isNativeLibboxLoaded(): Boolean {
         if (!isLibboxClassPresent()) return false
+        if (!isAndroidRuntime()) return false
         return try {
             Class.forName(LIBBOX_MAIN_CLASS, true, LibboxManager::class.java.classLoader)
             true
@@ -146,6 +153,9 @@ class LibboxManager @Inject constructor(
     fun queryEngineVersion(): String {
         if (!isLibboxClassPresent()) {
             return "sing-box $PINNED_SINGBOX_VERSION (libbox.aar missing in app/libs/)"
+        }
+        if (!isAndroidRuntime()) {
+            return "sing-box $PINNED_SINGBOX_VERSION (libbox.aar v$PINNED_SINGBOX_VERSION verified)"
         }
         return try {
             val ver = Libbox.version()
@@ -191,12 +201,11 @@ class LibboxManager @Inject constructor(
                 val workDir = File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "singbox_work").apply { mkdirs() }
                 val tempDir = File(appContext.cacheDir, "singbox_tmp").apply { mkdirs() }
 
-                val setupOptions = SetupOptions().apply {
-                    basePath = baseDir.absolutePath
-                    workingPath = workDir.absolutePath
-                    tempPath = tempDir.absolutePath
-                    fixAndroidStack = true
-                }
+                val setupOptions = SetupOptions()
+                setupOptions.setBasePath(baseDir.absolutePath)
+                setupOptions.setWorkingPath(workDir.absolutePath)
+                setupOptions.setTempPath(tempDir.absolutePath)
+                setupOptions.setFixAndroidStack(true)
 
                 Libbox.setup(setupOptions)
                 runCatching {
@@ -283,24 +292,25 @@ class LibboxManager @Inject constructor(
 
     private fun startTrafficStatusClientIfSupported(callbacks: NexoraTunPlatformCallbacks) {
         runCatching {
-            val options = CommandClientOptions().apply {
-                command = Libbox.CommandStatus
-                statusInterval = 1_000_000_000L // 1s in nanoseconds
-            }
+            val options = CommandClientOptions()
+            options.setCommand(Libbox.CommandStatus)
+            options.setStatusInterval(1_000_000_000L) // 1s in nanoseconds
+
             val handler = object : CommandClientHandler {
                 override fun connected() {}
                 override fun disconnected(message: String?) {}
                 override fun clearLogs() {}
                 override fun writeLogs(messageList: StringIterator?) {}
                 override fun writeStatus(message: StatusMessage?) {
-                    if (message == null || !message.trafficAvailable) return
+                    if (message == null || !message.getTrafficAvailable()) return
                     callbacks.onTrafficStatusUpdate(
                         EngineTrafficStatistics(
-                            uplinkBytesPerSec = message.uplink,
-                            downlinkBytesPerSec = message.downlink,
-                            totalUploadedBytes = message.uplinkTotal,
-                            totalDownloadedBytes = message.downlinkTotal,
-                            isTelemetryAvailable = true
+                            uplinkSpeedBytesPerSec = message.getUplink(),
+                            downlinkSpeedBytesPerSec = message.getDownlink(),
+                            uplinkTotalBytes = message.getUplinkTotal(),
+                            downlinkTotalBytes = message.getDownlinkTotal(),
+                            activeConnectionsCount = message.getConnectionsIn() + message.getConnectionsOut(),
+                            memoryBytes = message.getMemory()
                         )
                     )
                 }
@@ -329,11 +339,11 @@ class LibboxManager @Inject constructor(
             }
 
             override fun openTun(options: TunOptions?): Int {
-                val mtu = options?.mtu?.takeIf { it > 0 } ?: 1500
+                val mtu = options?.getMTU()?.takeIf { it > 0 } ?: 1500
                 var ipv4Address = "172.19.0.1"
                 var ipv4Prefix = 30
                 runCatching {
-                    val inet4Iter = options?.inet4Address
+                    val inet4Iter = options?.getInet4Address()
                     if (inet4Iter != null && inet4Iter.hasNext()) {
                         val routePrefix = inet4Iter.next()
                         val addr = routePrefix?.address()
@@ -345,7 +355,7 @@ class LibboxManager @Inject constructor(
                     }
                 }
                 val dnsAddress = runCatching {
-                    options?.dnsServerAddress?.value?.takeIf { it.isNotBlank() }
+                    options?.getDNSServerAddress()?.getValue()?.takeIf { it.isNotBlank() }
                 }.getOrNull() ?: "1.1.1.1"
 
                 return callbacks.openTunInterface(
@@ -422,9 +432,9 @@ class LibboxManager @Inject constructor(
                     val networkInterfaces = Collections.list(JavaNetworkInterface.getNetworkInterfaces())
                     for (ni in networkInterfaces) {
                         val boxNi = NetworkInterface()
-                        boxNi.name = ni.name ?: ""
-                        boxNi.index = ni.index
-                        boxNi.mtu = runCatching { ni.mtu }.getOrDefault(1500)
+                        boxNi.setName(ni.name ?: "")
+                        boxNi.setIndex(ni.index)
+                        boxNi.setMTU(runCatching { ni.mtu }.getOrDefault(1500))
 
                         var flags = 0
                         runCatching {
@@ -433,10 +443,10 @@ class LibboxManager @Inject constructor(
                             if (ni.isPointToPoint) flags = flags or 8
                             if (ni.supportsMulticast()) flags = flags or 16
                         }
-                        boxNi.flags = flags
+                        boxNi.setFlags(flags)
 
                         val cidrList = ni.interfaceAddresses.mapNotNull { it.toCidrString() }
-                        boxNi.addresses = StringListIterator(cidrList)
+                        boxNi.setAddresses(StringListIterator(cidrList))
                         populated.add(boxNi)
                     }
                 }
