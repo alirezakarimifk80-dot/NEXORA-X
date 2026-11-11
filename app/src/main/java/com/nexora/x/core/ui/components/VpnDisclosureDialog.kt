@@ -77,7 +77,7 @@ fun VpnDisclosureDialog(
                     color = NexoraColors.CyanHighlight.copy(alpha = 0.55f),
                     shape = RoundedCornerShape(16.dp)
                 ),
-            color = NexoraColors.MidnightSurface,
+            color = NexoraColors.ElevatedCardSurface,
             tonalElevation = 8.dp
         ) {
             Column(
@@ -189,7 +189,7 @@ private fun DisclosureSectionItem(
             .background(NexoraColors.DeepNavyBackground.copy(alpha = 0.7f))
             .border(
                 width = 1.dp,
-                color = NexoraColors.BorderSubtle,
+                color = NexoraColors.HairlineBorder,
                 shape = RoundedCornerShape(10.dp)
             )
             .padding(12.dp),

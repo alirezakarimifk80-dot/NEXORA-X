@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.nexora.x"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.nexora.x"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 4
         versionName = "1.0.0"
 

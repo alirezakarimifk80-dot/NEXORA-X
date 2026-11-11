@@ -18,7 +18,7 @@ permissions:
 env:
   JAVA_VERSION: '17'
   GRADLE_VERSION: '8.9'
-  COMPILE_SDK: '36'
+  COMPILE_SDK: '35'
   BUILD_TOOLS_VERSION: '35.0.0'
   APP_MODULE: ':app'
   APK_OUTPUT_DIR: 'app/build/outputs/apk/debug'
@@ -43,7 +43,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 3. Set Up Android SDK (API 36 & Build-Tools 35.0.0)
+      - name: 3. Set Up Android SDK (API 35 & Build-Tools 35.0.0)
         id: android_sdk_setup
         run: |
           set -e
@@ -322,7 +322,7 @@ jobs:
           if [ "${{ steps.android_sdk_setup.outcome }}" == "failure" ]; then
             FAILED_TASK="3. Set Up Android SDK"
             CAUSE_EXPLANATION="Android SDK package installation or license acceptance failed."
-            CONCRETE_FIX="Verify ANDROID_HOME permissions and availability of platforms;android-36 and build-tools;35.0.0."
+            CONCRETE_FIX="Verify ANDROID_HOME permissions and availability of platforms;android-35 and build-tools;35.0.0."
           elif [ "${{ steps.prepare_libbox_aar.outcome }}" == "failure" ]; then
             FAILED_TASK="4. Assemble & Verify Official sing-box libbox.aar (v1.10.7)"
             CAUSE_EXPLANATION="Failed to download or assemble app/libs/libbox.aar from official SagerNet/sing-box v1.10.7 release."

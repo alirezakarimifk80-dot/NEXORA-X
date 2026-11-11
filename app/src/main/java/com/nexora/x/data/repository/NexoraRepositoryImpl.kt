@@ -203,7 +203,7 @@ class NexoraRepositoryImpl @Inject constructor() : NexoraRepository {
                 id = "app_version",
                 category = SettingsCategory.ABOUT,
                 title = "Application Version",
-                subtitle = "Compile & Target SDK 36 · Min SDK 26 · Version Code ${AppConstants.VERSION_CODE}",
+                subtitle = "Compile & Target SDK 35 · Min SDK 26 · Version Code ${AppConstants.VERSION_CODE}",
                 currentValue = AppConstants.VERSION_NAME,
                 status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
