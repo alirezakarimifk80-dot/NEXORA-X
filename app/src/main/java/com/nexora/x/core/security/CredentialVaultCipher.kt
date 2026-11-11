@@ -48,6 +48,11 @@ object CredentialVaultCipher {
     private var jvmTestFallbackKey: SecretKey? = null
 
     /**
+     * Returns `true` if [value] has already been encrypted by [CredentialVaultCipher].
+     */
+    fun isEncryptedPayload(value: String): Boolean = value.startsWith(CIPHERTEXT_PREFIX)
+
+    /**
      * Encrypts [plaintext] using AES-256-GCM and prefixes with [CIPHERTEXT_PREFIX].
      * Blank strings are returned as-is; already-encrypted strings are not double-encrypted.
      */

@@ -227,7 +227,7 @@ class SingBoxEngineAndConfigTest {
         val entityString = entity.toString()
         assertFalse(entityString.contains(rawUuid))
         assertFalse(entityString.contains(entity.credential))
-        assertTrue(entityString.contains("***REDACTED***"))
+        assertTrue(entityString.contains("[REDACTED]"))
 
         // ProfileMapper.toDomain() must transparently decrypt back to exact domain values
         val restored = ProfileMapper.toDomain(entity, selectedProfileId = "sec-01-test")
