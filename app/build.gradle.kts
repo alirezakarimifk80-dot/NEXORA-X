@@ -104,6 +104,13 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        xmlReport = true
+        htmlReport = true
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

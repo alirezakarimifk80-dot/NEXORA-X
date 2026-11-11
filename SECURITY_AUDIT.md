@@ -1,301 +1,152 @@
-# NEXORA X (`com.nexora.x`) — Comprehensive Security Audit & OWASP MASVS Assessment
+# NEXORA X (`com.nexora.x`) — گزارش جامع ممیزی امنیتی (Comprehensive Security Audit Report)
 
-- **Application**: `NEXORA X` (`com.nexora.x`)
-- **Version**: `1.0.0` (`versionCode = 4`)
-- **Architecture**: Kotlin 2.0.21, Jetpack Compose (Material 3), Hilt 2.52, Room 2.6.1, Jetpack DataStore Preferences 1.1.1, Android `VpnService`, `sing-box` (`io.nekohasekai.libbox` `v1.10.7`)
-- **Assessment Framework**: **OWASP Mobile Application Security Verification Standard (MASVS v2.1.0)** (`MASVS-STORAGE`, `MASVS-CRYPTO`, `MASVS-NETWORK`, `MASVS-PLATFORM`, `MASVS-CODE`, `MASVS-PRIVACY`)
-- **Audit Status**: **ALL CRITICAL, HIGH, MEDIUM, AND LOW FINDINGS REMEDIATED & VERIFIED**
-
----
-
-## 1. Executive Summary
-
-A comprehensive line-by-line source code and architecture security audit was performed on the **NEXORA X** Android VPN client (`com.nexora.x`). The audit evaluated 10 security domains across Kotlin source files, Jetpack Compose UI screens, Room SQLite persistence, Jetpack DataStore, Android `VpnService` & `libbox` (`sing-box v1.10.7`) integration, `AndroidManifest.xml`, backup/network XML policies, R8/ProGuard configurations, and CI/CD workflows.
-
-### Summary of Findings & Remediation Status
-
-| ID | Severity | OWASP MASVS Control | Title | Affected Component(s) | Status |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **SEC-01** | **HIGH** | `MASVS-STORAGE-1` / `MASVS-CRYPTO-1` | Plaintext Proxy Credentials & Reality Keys Stored at Rest in Room SQLite | `ProfileEntity.kt`, `ProfileMapper.kt` | **REMEDIATED** (`CredentialVaultCipher.kt` Hardware-Backed AES-256-GCM via `AndroidKeyStore`) |
-| **SEC-02** | **MEDIUM** | `MASVS-NETWORK-1` | Missing RFC 2818/6125 Hostname Verification on Stage D `SSLSocket` Handshake | `TunnelConnectivityVerifier.kt` | **REMEDIATED** (`endpointIdentificationAlgorithm = "HTTPS"` + `HttpsURLConnection.getDefaultHostnameVerifier()`) |
-| **SEC-03** | **MEDIUM** | `MASVS-NETWORK-1` (VPN Traffic Security) | Potential IPv6 Traffic Leak on Dual-Stack Networks (`0.0.0.0/0` Only) | `NexoraVpnService.kt`, `SingBoxConfigGenerator.kt` | **REMEDIATED** (IPv6 ULA `fdfe:dcba:9876::1/126` + Default Route `::/0` Captured in TUN) |
-| **SEC-04** | **LOW** | `MASVS-PLATFORM-1` / `MASVS-STORAGE-2` | Exported Proxy URI Copied to Clipboard Without `EXTRA_IS_SENSITIVE` Flag | `ServersScreen.kt` | **REMEDIATED** (`ClipDescription.EXTRA_IS_SENSITIVE` / `android.content.extra.IS_SENSITIVE = true`) |
-| **SEC-05** | **LOW** | `MASVS-PRIVACY-1` / `MASVS-PLATFORM-3` | Foreground VPN Notification Lockscreen Visibility Set to `VISIBILITY_PUBLIC` | `VpnNotificationManager.kt` | **REMEDIATED** (`VISIBILITY_PRIVATE` + Redacted `setPublicVersion` Lockscreen Notification) |
-| **SEC-06** | **LOW** | `MASVS-NETWORK-1` | `allowInsecure` (`"insecure": true`) Lacks Explicit MITM Warning in Config Generator & UI | `SingBoxConfigGenerator.kt`, `AddProfileScreen.kt` | **REMEDIATED** (Explicit MITM Security Warning Emitted in Generator & Displayed in UI) |
-| **SEC-07** | **INFORMATIONAL** | `MASVS-CODE-3` | Native Binary Non-Empty & SHA-256 Verification in `fetch-libbox-aar.sh` | `scripts/fetch-libbox-aar.sh` | **REMEDIATED** (`-s` Non-Empty Check + SHA-256 Digest Logging per ABI) |
-
-- **Critical Findings**: `0`
-- **High Findings**: `1` (100% Remediated)
-- **Medium Findings**: `2` (100% Remediated)
-- **Low Findings**: `3` (100% Remediated)
-- **Informational Findings**: `1` (100% Remediated)
+- **نام پروژه**: `NEXORA X` (`com.nexora.x`)
+- **نسخه مورد بررسی**: `1.0.0` (`versionCode = 4`, `minSdk = 26`, `compileSdk = 35`, `targetSdk = 35`)
+- **موتور هسته VPN**: `sing-box` (`io.nekohasekai.libbox` نسخه `1.10.7`)
+- **چارچوب ارزیابی**: **OWASP MASVS v2.1.0 / OWASP MASTG** (`MASVS-STORAGE`, `MASVS-CRYPTO`, `MASVS-NETWORK`, `MASVS-PLATFORM`, `MASVS-CODE`, `MASVS-RESILIENCE`, `MASVS-PRIVACY`) + بررسی امنیتی Backend/CI-CD
+- **روش ممیزی**: بررسی دستی خطبهخط سورسکد Kotlin، فایلهای پیکربندی اندروید و Gradle، اسکریپتهای CI/CD گیتهاب، و سرور همراه Express (`server.ts`) + اسکن استاتیک الگوهای پرخطر (بدون تغییر در کدهای اجرایی پروژه در طول ممیزی).
 
 ---
 
-## 2. Detailed Vulnerability Analysis, Source Evidence & Remediations
+## ۱. خلاصه مدیریتی (Executive Summary)
+
+در این ممیزی عمیق امنیتی، کل مخزن پروژه **NEXORA X** بهصورت مستقل از گزارشهای پیشین بازبینی شد. ابتدا اصلاحات قبلی (`SEC-01` تا `SEC-07`) مستقیماً روی سورسکد راستیآزمایی شدند و سپس تمام نقاط کور معماری در ۱۰ حوزه (ذخیرهسازی و رمزنگاری، سرویس VPN و شبکه، تولید کانفیگ `sing-box`، امنیت پلتفرم اندروید، سرور همراه `server.ts`، پایپلاین GitHub Actions و زنجیره تأمین `libbox`) بررسی گردیدند.
+
+### خلاصه آماری یافتههای فعلی (در کد فعلی مخزن)
+
+| سطح خطر (Severity) | تعداد یافتههای باز / نیازمند بهبود در کد فعلی | شناسه‌ها |
+| :--- | :---: | :--- |
+| **Critical (بحرانی)** | **0** | — |
+| **High (بالا)** | **2** | `SEC-006` (زنجیره تأمین CI/CD بدون مقایسه SHA-256 پین‌شده)، `SEC-007` (پورت‌اسکن/SSRF در `/api/network/ping` و `/api/network/tunnel-check` در `server.ts`) |
+| **Medium (متوسط)** | **6** | `SEC-001`، `SEC-003`، `SEC-004`، `SEC-005`، `SEC-008`، `SEC-009` |
+| **Low (پایین)** | **5** | `SEC-002`، `SEC-010`، `SEC-011`، `SEC-012`، `SEC-013` |
+| **Informational (اطلاعاتی)** | **1** | `SEC-014` |
+| **مجموع کل یافتهها** | **14 یافته** | ثبت‌شده با جزئیات خط و فایل در `VULNERABILITY_REGISTER.md` |
 
 ---
 
-### [SEC-01] Plaintext Proxy Credentials & Reality Keys Stored at Rest in Room SQLite
+## ۲. راستیآزمایی مستقل اصلاحات قبلی (`SEC-01` تا `SEC-07`) روی سورسکد واقعی
 
-- **Severity**: `HIGH`
-- **OWASP MASVS**: `MASVS-STORAGE-1` (*The app securely stores sensitive data in local storage*), `MASVS-CRYPTO-1` (*The app employs current strong cryptography and uses it according to industry best practices*)
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/core/database/ProfileEntity.kt` (lines 44–45, 72–76)
-  - `app/src/main/java/com/nexora/x/core/database/ProfileMapper.kt` (lines 33, 43–44, 73, 82–83)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  // app/src/main/java/com/nexora/x/core/database/ProfileEntity.kt
-  @ColumnInfo(name = "credential")
-  val credential: String, // VLESS/VMess UUID or Trojan/Shadowsocks Password
-  ...
-  @ColumnInfo(name = "reality_public_key")
-  val realityPublicKey: String,
-  @ColumnInfo(name = "reality_short_id")
-  val realityShortId: String,
-  ```
-  And in `ProfileMapper.kt`:
-  ```kotlin
-  credential = domain.credential,
-  realityPublicKey = domain.tlsConfig.realityPublicKey,
-  realityShortId = domain.tlsConfig.realityShortId,
-  ```
-- **Security Impact**:
-  Although `nexora_profiles.db` is stored inside the app's private sandbox (`/data/user/0/com.nexora.x/databases/nexora_profiles.db`) and excluded from cloud/ADB backups via `backup_rules.xml` and `data_extraction_rules.xml`, storing proxy UUIDs, Trojan/Shadowsocks passwords, and Reality keys in plaintext SQLite columns means any root exploit, forensic physical image, or accidental `ProfileEntity.toString()` trace could recover raw proxy credentials.
-- **Remediation Implemented**:
-  1. Created `app/src/main/java/com/nexora/x/core/security/CredentialVaultCipher.kt`:
-     - Generates and stores a non-exportable 256-bit AES master key (`nexora_x_profile_vault_aes256_v1`) inside the hardware-backed `AndroidKeyStore` (`KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT`, `BLOCK_MODE_GCM`, `ENCRYPTION_PADDING_NONE`, `setRandomizedEncryptionRequired(true)`).
-     - Encrypts every secret with a fresh 96-bit (12-byte) IV and a 128-bit GCM authentication tag, formatted as `ENCv1:<Base64Url(IV || Ciphertext || Tag)>`.
-     - Rejects tampered ciphertext with `SecurityException` on GCM tag mismatch.
-     - Supports transparent backward-compatible read migration for any pre-existing unprefixed rows.
-  2. Updated `app/src/main/java/com/nexora/x/core/database/ProfileMapper.kt`:
-     - `toEntity()` encrypts `credential`, `realityPublicKey`, and `realityShortId` via `CredentialVaultCipher.encryptForStorage(...)` before Room writes to SQLite.
-     - `toDomain()` decrypts `credential`, `realityPublicKey`, and `realityShortId` via `CredentialVaultCipher.decryptFromStorage(...)`.
-  3. Updated `app/src/main/java/com/nexora/x/core/database/ProfileEntity.kt`:
-     - Overrode `toString()` to mask `credential`, `realityPublicKey`, and `realityShortId` as `***REDACTED***`.
+برخلاف تکیه صرف به گزارش قبلی، هر ۷ مورد مستقیماً در کد فعلی بازرسی شدند:
+
+| شناسه قبلی | عنوان | وضعیت واقعی در سورسکد فعلی | یافتههای جدید کشف‌شده در بازرسی عمیق |
+| :--- | :--- | :--- | :--- |
+| **SEC-01** | رمزنگاری `credential`, `realityPublicKey`, `realityShortId` در Room با AES-256-GCM | **اعمال شده اما دارای نقطه ضعف در مدیریت خطا** (`CredentialVaultCipher.kt:54-82` و `ProfileMapper.kt:26-40`) | در `CredentialVaultCipher.kt` خطوط ۷۸ تا ۸۱، بلوک `catch (_: Throwable)` در صورت بروز خطا در Keystore، مقدار **`plaintext` خام** را بدون رمزنگاری برمیگرداند (`SEC-001`). همچنین `ProfileMapper.kt` خط ۳۲ خطای دستکاری تگ GCM (`SecurityException`) را با `runCatching { ... }.getOrDefault("")` بیصدا نادیده میگیرد (`SEC-002`). |
+| **SEC-02** | بررسی تطابق Hostname در اتصال TLS مرحله Stage D | **اعمال شده اما مشروط به `!allowInsecure`** (`TunnelConnectivityVerifier.kt:162-183`) | الگوریتم `HTTPS` و `HttpsURLConnection.getDefaultHostnameVerifier().verify(...)` در خطوط ۱۶۸ و ۱۷۶ اضافه شده است؛ اما در خط ۱۶۲ اگر `allowInsecure == true` باشد، کل هندشیک TLS در Stage D رد میشود و فقط اتصال خام TCP تست میگردد (`SEC-003`). |
+| **SEC-03** | جلوگیری از نشت ترافیک IPv6 در شبکه‌های Dual-Stack | **اعمال شده اما هاردکد شده در `NexoraVpnService`** (`NexoraVpnService.kt:138-141` و `SingBoxConfigGenerator.kt:102`) | آدرس `fdfe:dcba:9876::1/126` و مسیر `::/0` در `NexoraVpnService.kt` اضافه شده‌اند، اما در `LibboxManager.kt` خطوط ۳۸۶ تا ۴۱۲ متد `openTun(options: TunOptions?)` فیلد `options?.getInet6Address()` را از `libbox` نمیخواند (`SEC-004`). |
+| **SEC-04** | مخفیسازی لینک کپی‌شده در کلیپبورد اندروید ۱۳+ | **بهطور کامل اعمال شده** (`ServersScreen.kt:332-342`) | فلگ `android.content.extra.IS_SENSITIVE = true` روی `ClipData` تنظیم شده است. تنها نکته تکمیلی، نبود پاکسازی خودکار کلیپبورد پس از ۶۰ ثانیه برای اندروید ۸ تا ۱۲ است. |
+| **SEC-05** | عدم نمایش نام پروفایل روی صفحه قفل (Lock Screen) | **بهطور کامل اعمال شده** (`VpnNotificationManager.kt:85-102`) | `NotificationCompat.VISIBILITY_PRIVATE` بههمراه `.setPublicVersion(...)` با متن سانسورشده اعمال شده است. |
+| **SEC-06** | هشدار صریح MITM هنگام فعال بودن `allowInsecure` | **بهطور کامل اعمال شده** (`SingBoxConfigGenerator.kt:64-69` و `AddProfileScreen.kt:502-511`) | هم در خروجی `warnings` کانفیگ و هم در رابط کاربری (با رنگ `NexoraColors.StatusPendingAmber` در خط ۵۰۶) اعمال شده است. |
+| **SEC-07** | بررسی فایلهای باینری `libbox.so` در اسکریپت ساخت AAR | **ناقص (فقط چاپ هش بدون مقایسه با هش مرجع)** (`scripts/fetch-libbox-aar.sh:78-89` و `.github/workflows/android-apk.yml:127-147`) | اسکریپت `fetch-libbox-aar.sh` غیرخالی بودن (`-s`) را چک کرده و هش SHA-256 را **چاپ** میکند، اما آن را با هش ثابت و پین‌شده مقایسه (`sha256sum -c`) نمیکند! همچنین بلوک fallback داخل `android-apk.yml` (خطوط ۱۲۷ تا ۱۴۷) اصلاً بررسی SHA-256 ندارد (`SEC-006`). |
 
 ---
 
-### [SEC-02] Missing RFC 2818/6125 Hostname Verification on Stage D `SSLSocket` Handshake
+## ۳. بررسی عمیق حوزههای ده‌گانه امنیتی
 
-- **Severity**: `MEDIUM`
-- **OWASP MASVS**: `MASVS-NETWORK-1` (*The app secures all network traffic according to current best practices*)
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/core/engine/TunnelConnectivityVerifier.kt` (lines 161–174)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-  (sslFactory.createSocket(rawSocket, sniHost, port, true) as SSLSocket).use { sslSocket ->
-      sslSocket.soTimeout = STAGE_D_TIMEOUT_MS
-      runCatching {
-          val params: SSLParameters = sslSocket.sslParameters
-          params.serverNames = listOf(SNIHostName(sniHost))
-          sslSocket.sslParameters = params
-      }
-      sslSocket.startHandshake()
-  }
-  ```
-- **Security Impact**:
-  In Java/Android `javax.net.ssl.SSLSocket`, `SSLSocketFactory.getDefault().createSocket(...)` validates that the peer certificate chains to a trusted CA in the system trust store, but **does not enforce hostname verification** unless `SSLParameters.endpointIdentificationAlgorithm = "HTTPS"` is configured or `HttpsURLConnection.getDefaultHostnameVerifier().verify(sniHost, sslSocket.session)` is checked after `startHandshake()`. Without this check, Stage D's diagnostic probe could accept a valid CA-issued certificate belonging to a different domain during an active MITM attack.
-- **Remediation Implemented**:
-  Updated `TunnelConnectivityVerifier.kt` (lines 165–183) to:
-  1. Configure `params.endpointIdentificationAlgorithm = "HTTPS"` on `sslSocket.sslParameters` prior to `startHandshake()`.
-  2. Explicitly invoke `HttpsURLConnection.getDefaultHostnameVerifier().verify(sniHost, sslSocket.session)` immediately after `sslSocket.startHandshake()` and throw `SSLPeerUnverifiedException` if the certificate's Subject Alternative Name (SAN) / CN does not match `sniHost`.
-
----
-
-### [SEC-03] Potential IPv6 Traffic Leak on Dual-Stack Networks (`0.0.0.0/0` Only)
-
-- **Severity**: `MEDIUM`
-- **OWASP MASVS**: `MASVS-NETWORK-1` (VPN Traffic & Routing Security)
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/core/engine/service/NexoraVpnService.kt` (lines 127–134)
-  - `app/src/main/java/com/nexora/x/core/engine/SingBoxConfigGenerator.kt` (lines 99–110)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  // NexoraVpnService.kt
-  val builder = Builder()
-      .setSession("NEXORA X")
-      .setMtu(safeMtu)
-      .setBlocking(false)
-      .addAddress(ipv4Address, ipv4Prefix)
-      .addRoute("0.0.0.0", 0)
-      .addDnsServer(dnsAddress)
-  ```
-- **Security Impact**:
-  When an Android device is connected to a dual-stack IPv4/IPv6 Wi-Fi or mobile carrier network, capturing only `.addRoute("0.0.0.0", 0)` leaves the system's IPv6 default route (`::/0`) pointing to the physical interface (`wlan0`/`rmnet_data0`) unless the VPN also binds an IPv6 address and captures `::/0`. Although `sing-box` DNS was configured with `"strategy": "prefer_ipv4"`, applications connecting directly to IPv6 literals or dual-stack sockets could bypass `tun0`.
-- **Remediation Implemented**:
-  1. Updated `NexoraVpnService.kt` (`openTunInterface`) to bind an RFC 4193 IPv6 Unique Local Address (`.addAddress("fdfe:dcba:9876::1", 126)`) and capture the IPv6 default route (`.addRoute("::", 0)`).
-  2. Updated `SingBoxConfigGenerator.kt` (`"tun-in"` inbound) to include `"inet6_address": "fdfe:dcba:9876::1/126"` alongside `"inet4_address": "172.19.0.1/30"`, ensuring `sing-box`'s userspace `gvisor` stack processes both IPv4 and IPv6 packets inside the tunnel.
+### بخش ۱: امنیت اطلاعات و رمزنگاری (`MASVS-STORAGE` & `MASVS-CRYPTO`)
+1. **ذخیرهسازی کلید در Android Keystore (`CredentialVaultCipher.kt:123-156`)**:
+   - از الگوریتم `AES/GCM/NoPadding` با طول کلید ۲۵۶ بیت، IV تصادفی ۱۲ بایتی (۹۶ بیتی) و تگ احراز اصالت ۱۲۸ بیتی استفاده شده که از نظر رمزنگاری استاندارد است.
+   - **آسیبپذیری `SEC-001` (Medium)**: در `CredentialVaultCipher.kt` خطوط ۷۸ تا ۸۱:
+     ```kotlin
+     } catch (_: Throwable) {
+         // Fail-safe fallback so profile persistence never crashes on broken OEM Keystore firmware
+         plaintext
+     }
+     ```
+     اگر به هر دلیل (مثلاً باطل شدن کلید پس از تغییر قفل صفحه یا خطای موقت Keystore) استثنایی رخ دهد، متد `encryptForStorage` بدون اطلاع کاربر، رمز یا UUID را بهصورت **متن خام (Plaintext)** در دیتابیس ذخیره میکند.
+2. **ذخیرهسازی مسیر کاری و لاگ `stderr` موتور `libbox` (`LibboxManager.kt:211, 222`)**:
+   - **آسیبپذیری `SEC-005` (Medium)**: در `LibboxManager.kt` خط ۲۱۱:
+     ```kotlin
+     val workDir = File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "singbox_work").apply { mkdirs() }
+     ```
+     و در خط ۲۲۲:
+     ```kotlin
+     Libbox.redirectStderr(File(workDir, "stderr.log").absolutePath)
+     ```
+     استفاده از `getExternalFilesDir(null)` دایرکتوری کاری `singbox_work` و فایل `stderr.log` را روی حافظه خارجی اختصاصی اپ (`/sdcard/Android/data/com.nexora.x/files/singbox_work/stderr.log`) قرار میدهد، نه در حافظه داخلی محافظت‌شده (`context.filesDir`). علاوه بر این، خروجی `redirectStderr` مستقیماً از سطح هسته Go به فایل `stderr.log` نوشته میشود و از فیلتر `LogRedactor` عبور نمیکند.
+3. **وضعیت ادعای پاکسازی `active-config.json` در گزارش قبلی**:
+   - بررسی واقعی `SingBoxEngine.kt` (خطوط ۷۳، ۱۰۶، ۲۱۷ و ۳۵۶) نشان میدهد کانفیگ JSON اصلاً در فایلی به نام `active-config.json` نوشته نمیشود، بلکه در متغیر حافظه `@Volatile private var preparedConfigJson: String? = null` نگهداری شده و مستقیماً به `Libbox.newService(configJson, platformInterface)` داده میشود. این معماری از نوشتن کانفیگ خام روی دیسک جلوگیری میکند که مثبت است؛ اما در `SingBoxEngine.kt` خط ۳۴۷ اگر وضعیت موتور `DISCONNECTED` یا `ERROR` باشد و `stopSession()` صدا زده شود، متغیر `preparedProfile` در حافظه پاک نمیشود.
+4. **بکاپ و انتقال داده (`AndroidManifest.xml:14-16`, `backup_rules.xml`, `data_extraction_rules.xml`)**:
+   - ویژگی `android:allowBackup="false"` فعال است و قوانین XML بهدرستی دیتابیس `nexora_profiles.db` را از Cloud Backup و Device-to-Device Transfer خارج کرده‌اند.
 
 ---
 
-### [SEC-04] Exported Proxy URI Copied to Clipboard Without `EXTRA_IS_SENSITIVE` Masking
-
-- **Severity**: `LOW`
-- **OWASP MASVS**: `MASVS-PLATFORM-1` / `MASVS-STORAGE-2` (*Sensitive data leakage via OS mechanisms*)
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/feature/servers/ServersScreen.kt` (lines 332–335)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  onCopyLink = {
-      val uri = viewModel.buildShareableUri(profile)
-      clipboardManager.setText(AnnotatedString(uri))
-  }
-  ```
-- **Security Impact**:
-  On Android 13+ (API 33+), copying text via Compose's default `LocalClipboardManager.setText(...)` displays the copied text in a floating plaintext clipboard overlay at the bottom of the screen. Because a shareable `vless://`, `vmess://`, `trojan://`, or `ss://` link contains the server's UUID or password, shoulder-surfers or screen recordings can observe the secret in the system clipboard toast.
-- **Remediation Implemented**:
-  Updated `ServersScreen.kt` to copy shareable URIs using Android's `ClipboardManager` with `ClipData.newPlainText` and `PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }` (`ClipDescription.EXTRA_IS_SENSITIVE`), instructing Android 13+ to mask the clipboard preview popup (`••••••`).
+### بخش ۲: امنیت VPN و شبکه (`MASVS-NETWORK`)
+1. **مدیریت File Descriptor و `VpnService.protect()` (`NexoraVpnService.kt:113-170`, `LibboxManager.kt:377-384`)**:
+   - متد `protectSocketFd(fd: Int)` در `NexoraVpnService.kt` خط ۱۱۴ فراخوانی `protect(fd)` را انجام میدهد و در `LibboxManager.kt` خط ۳۸۰ اگر `protect(fd)` مقدار `false` برگرداند، استثنای `IllegalStateException` پرتاب میشود تا ترافیک خروجی پراکسی وارد حلقه بی‌نهایت (Routing Loop) نشود.
+   - همچنین در `NexoraVpnService.kt` خط ۱۴۹ پکیج خود برنامه با `builder.addDisallowedApplication(packageName)` از تونل مستثنی شده است.
+   - مدیریت descriptor با `ParcelFileDescriptor.dup(pfd.fileDescriptor).detachFd()` در خط ۱۶۶ از بروز خطای Double-Close بین جاوا و هسته Go جلوگیری میکند.
+2. **جلوگیری از DNS Leak (`SingBoxConfigGenerator.kt:71-103`)**:
+   - سرور نهایی DNS روی `dns-remote` (`https://1.1.1.1/dns-query` با `"detour": "proxy"`) تنظیم شده و قانون `"protocol": "dns" -> "dns-out"` تمام درخواستهای DNS داخل تونل را رهگیری میکند.
+   - تنها قانون استثنا، `"outbound": "any" -> "dns-direct"` (`1.1.1.1`) است که صرفاً برای Bootstrap کردن دامنه خود سرور پراکسی استفاده میشود تا بن‌بست (Deadlock) اولیه رخ ندهد.
+3. **بررسی TLS و گواهیها (`TunnelConnectivityVerifier.kt:161-183`)**:
+   - هیچ پیادهسازی ناامنی از `X509TrustManager` یا `HostnameVerifier` سفارشی در کل پروژه وجود ندارد.
+   - **آسیبپذیری `SEC-003` (Medium)**: در `TunnelConnectivityVerifier.kt` خط ۱۶۴، اگر کاربر تیک `allowInsecure` را زده باشد (`profile.tlsConfig.allowInsecure == true`)، مرحله Stage D بهطور کامل تست TLS را دور میزند و صرفاً اتصال خام TCP را کافی میداند. همچنین در خطوط ۱۶۷ تا ۱۷۱ تنظیم `sslSocket.sslParameters` داخل `runCatching` قرار گرفته که اگر `sniHost` یک آدرس IP باشد (`SNIHostName` روی رشته IP خطا میدهد)، تنظیم `endpointIdentificationAlgorithm = "HTTPS"` نیز ممکن است قبل از خطای `SNIHostName` اعمال نشود اگر ترتیب خطوط رعایت نشود (در کد فعلی `params.endpointIdentificationAlgorithm = "HTTPS"` قبل از `SNIHostName(sniHost)` است، اما چون `sslSocket.sslParameters = params` بعد از `SNIHostName` قرار دارد، در صورت IP بودن `sniHost`، خط ۱۷۰ اجرا نمیشود!).
 
 ---
 
-### [SEC-05] Foreground VPN Notification Lockscreen Visibility Set to `VISIBILITY_PUBLIC`
-
-- **Severity**: `LOW`
-- **OWASP MASVS**: `MASVS-PRIVACY-1` / `MASVS-PLATFORM-3` (*Lockscreen notification data exposure*)
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/core/engine/service/VpnNotificationManager.kt` (line 92)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  .setCategory(NotificationCompat.CATEGORY_SERVICE)
-  .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-  ```
-- **Security Impact**:
-  Setting `VISIBILITY_PUBLIC` on the persistent VPN foreground notification reveals the user's selected profile display name (which often includes server location, provider, or hostname) and real-time throughput on the device lockscreen even when the user has configured Android to hide sensitive notification content when locked.
-- **Remediation Implemented**:
-  Updated `VpnNotificationManager.kt` to set `.setVisibility(NotificationCompat.VISIBILITY_PRIVATE)` and provide a redacted `.setPublicVersion(publicLockscreenNotification)` that displays only `"NEXORA X · <State>"` and `"VPN session status active"` when the device screen is locked.
+### بخش ۳: امنیت `sing-box` و اعتبارسنجی کانفیگها (`MASVS-CODE`)
+1. **اعتبارسنجی پروفایلها (`SingBoxConfigGenerator.kt:165-237` و `UriParserUtils.kt:77-95`)**:
+   - پورت (`1..65535`)، ساختار UUID (فرمت استاندارد ۳۶ کاراکتری هگزادسیمال برای VLESS/VMess)، سایفرهای مجاز Shadowsocks (`ShadowsocksParser.SUPPORTED_CIPHERS`)، و الزام کلید عمومی و SNI در حالت Reality بهطور کامل بررسی میشوند.
+2. **احتمال تزریق کاراکترهای کنترلی در JSON (`SingBoxConfigGenerator.kt:377-378`)**:
+   - **آسیبپذیری `SEC-011` (Low)**: متد `private fun esc(s: String)` در خط ۳۷۷ فقط کاراکترهای `\` و `"` را escape میکند:
+     ```kotlin
+     private fun esc(s: String): String =
+         s.replace("\\", "\\\\").replace("\"", "\\\"")
+     ```
+     کاراکترهای کنترلی مانند `\n`، `\r`، `\t` یا کاراکترهای کنترلی یونیکد (`\u0000` تا `\u001F`) در صورت وجود در فیلدهای ورودی (مثل رمز Trojan یا مسیر WebSocket) escape نمیشوند که میتواند ساختار JSON تولیدشده را بشکند.
 
 ---
 
-### [SEC-06] `allowInsecure` (`"insecure": true`) Lacks Explicit MITM Warning in Config Generator & UI
-
-- **Severity**: `LOW`
-- **OWASP MASVS**: `MASVS-NETWORK-1`
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `app/src/main/java/com/nexora/x/core/engine/SingBoxConfigGenerator.kt` (line 302)
-  - `app/src/main/java/com/nexora/x/feature/profile/AddProfileScreen.kt` (lines 486–500)
-- **Source Code Evidence (Pre-Remediation)**:
-  ```kotlin
-  // SingBoxConfigGenerator.kt
-  append("  \"insecure\": ${profile.tlsConfig.allowInsecure}")
-  ```
-- **Security Impact**:
-  In `TlsConfig.kt` (line 16), `allowInsecure` securely defaults to `false`. However, if a user imports a third-party URI containing `allowInsecure=1` or toggles `"Allow Insecure Peer Certificate (Skip Verify)"` in `AddProfileScreen.kt`, `sing-box` sets `"insecure": true` on the outbound TLS configuration without surfacing a prominent MITM warning in `GeneratedSingBoxConfig.warnings` or beneath the UI toggle.
-- **Remediation Implemented**:
-  1. Updated `SingBoxConfigGenerator.kt` to emit an explicit security warning into `GeneratedSingBoxConfig.warnings` whenever `allowInsecure == true` on a TLS-enabled profile.
-  2. Updated `AddProfileScreen.kt` to render an amber security warning banner beneath the toggle explaining that `"insecure": true` disables peer certificate verification and exposes traffic to active MITM interception.
+### بخش ۴: امنیت پلتفرم اندروید (`MASVS-PLATFORM` & `MASVS-RESILIENCE`)
+1. **`AndroidManifest.xml` و Exported Components**:
+   - `MainActivity` دارای `android:exported="true"` صرفاً برای اکشن `MAIN` / `LAUNCHER` است و هیچ Deep Link خارجی برای اجرای خودکار دستورها ندارد.
+   - `NexoraVpnService` دارای `android:exported="false"` و مجوز سیستمی `android.permission.BIND_VPN_SERVICE` است.
+2. **قوانین R8 / ProGuard (`app/proguard-rules.pro:1-35`)**:
+   - **آسیبپذیری `SEC-012` (Low)**: بررسی واقعی فایل `app/proguard-rules.pro` نشان میدهد این فایل فقط ۳۵ خط دارد و برخلاف آنچه در گزارش قبلی نوشته شده بود، قاعده `-assumenosideeffects class android.util.Log` در آن **وجود ندارد**. همچنین قاعده `-keep class com.nexora.x.core.engine.** { *; }` (خط ۱۶) مانع از مبهمسازی (Obfuscation) نام تمام کلاسها و متدهای موتور VPN در نسخه Release میشود.
 
 ---
 
-### [SEC-07] Native Binary Non-Empty & SHA-256 Digest Verification in `scripts/fetch-libbox-aar.sh`
-
-- **Severity**: `INFORMATIONAL`
-- **OWASP MASVS**: `MASVS-CODE-3`
-- **Affected Files & Line Numbers (Pre-Remediation)**:
-  - `scripts/fetch-libbox-aar.sh` (lines 78–86)
-- **Remediation Implemented**:
-  Updated `scripts/fetch-libbox-aar.sh` to enforce non-empty file checks (`[ -s ... ]`) and log SHA-256 cryptographic digests (`sha256sum`) for each extracted `lib/{arm64-v8a,armeabi-v7a,x86_64,x86}/libbox.so` native binary during reproducible AAR assembly.
-
----
-
-## 3. Audit Verification Across All 7 Security Domains
-
-### Domain 1: Sensitive Data Protection (`MASVS-STORAGE-1`, `MASVS-STORAGE-2`, `MASVS-CRYPTO-1`)
-- **Room Database (`nexora_profiles.db`)**:
-  - `credential` (UUIDs/passwords), `realityPublicKey`, and `realityShortId` are encrypted at rest via `CredentialVaultCipher` (`AES/GCM/NoPadding`, 256-bit key in `AndroidKeyStore`, random 96-bit IV, 128-bit GCM authentication tag).
-  - `ProfileEntity.toString()` explicitly masks `credential`, `realityPublicKey`, and `realityShortId` as `***REDACTED***`.
-- **Jetpack DataStore (`nexora_preferences.preferences_pb`)**:
-  - Verified `PreferencesDataStore.kt` (lines 1–66): Stores only `app_theme_mode` (`SYSTEM`/`LIGHT`/`DARK`), `selected_profile_id` (non-secret UUID primary key of the Room row), and `vpn_disclosure_accepted` (`Boolean`). Zero secrets or proxy URIs are stored in DataStore.
-- **Runtime Working Directory (`SingBoxEngine.kt`)**:
-  - Verified `SingBoxEngine.kt` (lines 222–237): Writes `active-config.json` only into private app storage (`File(context.filesDir, "singbox/work/active-config.json")`) while a tunnel is starting, and **securely overwrites and deletes** the file (`activeConfigFile?.writeText("{}")` followed by `activeConfigFile?.delete()`) in `stopSession()` when the tunnel stops.
-- **Backup & Restore (`backup_rules.xml` & `data_extraction_rules.xml`)**:
-  - Verified `AndroidManifest.xml` (lines 20–22): `android:allowBackup="false"`, `android:fullBackupContent="@xml/backup_rules"`, and `android:dataExtractionRules="@xml/data_extraction_rules"`.
-  - Verified `backup_rules.xml` and `data_extraction_rules.xml`: Explicitly exclude `database/nexora_profiles.db`, `nexora_profiles.db-wal`, `nexora_profiles.db-shm`, and `files/singbox/` from cloud backup and device-to-device transfer.
-
-### Domain 2: Network Security (`MASVS-NETWORK-1`, `MASVS-NETWORK-2`)
-- **Search for Insecure TLS Patterns**:
-  - `TrustAllCertificates`: **0 occurrences** across the entire repository.
-  - `X509TrustManager`: **0 occurrences** across the entire repository.
-  - `AllowAllHostnameVerifier`: **0 occurrences** across the entire repository.
-  - `usesCleartextTraffic`: Set to `android:usesCleartextTraffic="false"` in `AndroidManifest.xml` (line 23) and `cleartextTrafficPermitted="false"` in `app/src/main/res/xml/network_security_config.xml` (line 11).
-  - Only `cp.cloudflare.com` is permitted for the standard RFC 8910 / Android captive-portal HTTP `204` tunnel connectivity check (`http://cp.cloudflare.com/generate_204`), with HTTPS fallback `https://connectivitycheck.gstatic.com/generate_204`.
-  - `TunnelConnectivityVerifier.kt` enforces both `SSLParameters.endpointIdentificationAlgorithm = "HTTPS"` and `HttpsURLConnection.getDefaultHostnameVerifier().verify(sniHost, sslSocket.session)`.
-
-### Domain 3: VPN Traffic Security (`MASVS-NETWORK-1`)
-- **Loop Prevention & Socket Protection**:
-  - `NexoraVpnService.kt` (line 149) excludes NEXORA X's own package (`builder.addDisallowedApplication(packageName)`) from TUN capture and implements `protectSocketFd(fd: Int)` via `VpnService.protect(fd)` (line 114), invoked by `LibboxManager.kt` (`autoDetectInterfaceControl(fd)` at line 153).
-- **DNS Leak Prevention & Bootstrap**:
-  - `SingBoxConfigGenerator.kt` configures DNS-over-HTTPS (`https://1.1.1.1/dns-query` detouring through `"proxy"`) as `"final": "dns-remote"`, with a bootstrap rule (`"outbound": "any" -> "dns-direct"`) only for resolving the proxy server's own address.
-  - All port-53/DNS protocol traffic inside the tunnel is intercepted by `"protocol": "dns" -> "dns-out"`.
-- **Dual-Stack IPv4 + IPv6 Capture**:
-  - Both IPv4 (`0.0.0.0/0` -> `172.19.0.1/30`) and IPv6 (`::/0` -> `fdfe:dcba:9876::1/126`) routes are captured into `tun0` and handled by `sing-box`'s `gvisor` stack.
-- **Truthful Connection State Machine**:
-  - `SingBoxEngine.kt` distinguishes `VPN_ACTIVE` (Stages A–C), `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE` / `CONNECTED` (only after Stages D, E, and F pass real network probes), and `NO_INTERNET` (when the tunnel is up but Stage D, E, or F fails).
-- **Clean Teardown & Revocation Handling**:
-  - `NexoraVpnService.onRevoke()` and `onDestroy()` immediately close the `ParcelFileDescriptor`, stop the `libbox` `BoxService`, wipe `active-config.json`, remove the foreground notification, and transition state to `DISCONNECTED`.
-
-### Domain 4: Logging & Diagnostics (`MASVS-STORAGE-2`)
-- **Zero Raw `android.util.Log` or `println` Calls**:
-  - Verified across all Kotlin files in `app/src/main/java`: **0 occurrences** of `Log.d`, `Log.e`, `Log.i`, `Log.w`, `Log.v`, `println`, `printStackTrace`, or `Timber`.
-- **Mandatory Redaction via `LogRedactor.kt`**:
-  - Every engine event, native `libbox` callback (`writeLog`), and stage failure message passes through `LogRedactor.redact(rawMessage, activeSecrets)` before entering the 60-entry in-memory ring buffer (`SingBoxEngine.kt` lines 250–266).
-  - `LogRedactor.kt` scrubs UUIDs (`[REDACTED_UUID]`), proxy URIs (`scheme://[REDACTED_URI]`), JSON `"password"`/`"uuid"`/`"public_key"`/`"short_id"` fields, query parameters (`pbk`, `sid`, `password`, `uuid`, `token`), and all active profile secrets.
-- **Release R8/ProGuard Log Stripping**:
-  - `app/proguard-rules.pro` (lines 65–72) includes `-assumenosideeffects class android.util.Log { public static int v(...); public static int d(...); }` to strip any verbose/debug logs from third-party libraries in release builds.
-
-### Domain 5: Android Platform Security (`MASVS-PLATFORM-1`, `MASVS-PLATFORM-2`, `MASVS-PLATFORM-3`)
-- **`AndroidManifest.xml` Component Exposure**:
-  - `MainActivity`: `android:exported="true"` (required for `MAIN`/`LAUNCHER` intent filter), `android:launchMode="singleTop"`. No deep-link `<intent-filter>` accepts external untrusted URI commands that auto-start or modify the VPN without user interaction.
-  - `NexoraVpnService`: `android:exported="false"`, protected by `android:permission="android.permission.BIND_VPN_SERVICE"` and `android:foregroundServiceType="specialUse"`.
-- **`PendingIntent` Immutability**:
-  - Verified `VpnNotificationManager.kt` (lines 61, 71): Both `openAppPendingIntent` and `stopVpnPendingIntent` explicitly use `PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE` and target explicit component classes (`MainActivity::class.java` and `NexoraVpnService::class.java`).
-- **Least-Privilege Permissions**:
-  - Requests only `INTERNET`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, and `POST_NOTIFICATIONS`. Does **not** request `QUERY_ALL_PACKAGES`, `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, `ACCESS_FINE_LOCATION`, `READ_PHONE_STATE`, or `CAMERA`.
-
-### Domain 6: Dependency & Supply-Chain Security (`MASVS-CODE-3`)
-- **Pinned Dependencies (`gradle/libs.versions.toml` & `app/build.gradle.kts`)**:
-  - Android Gradle Plugin `8.7.2`, Kotlin `2.0.21`, KSP `2.0.21-1.0.27`, Compose BOM `2024.10.01`, Room `2.6.1`, Hilt `2.52`, Coroutines `1.9.0`, DataStore `1.1.1`, ZXing Core `3.5.3` (local QR bitmap generation only).
-  - `sing-box` / `libbox` pinned to `v1.10.7` (`app/libs/libbox.aar`), reproducibly assembled from official `SagerNet/sing-box` `v1.10.7` release artifacts via `scripts/fetch-libbox-aar.sh` with non-empty and SHA-256 verification per ABI (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
-  - Zero dynamic `+` version ranges or untrusted third-party Maven repositories in `settings.gradle.kts` (only `google()`, `mavenCentral()`, and `jitpack.io`).
-
-### Domain 7: Privacy & Google Play Compliance (`MASVS-PRIVACY-1`, `MASVS-PRIVACY-2`)
-- **Zero Telemetry / Analytics / Crash Reporting SDKs**:
-  - Verified `app/build.gradle.kts`: No Firebase Analytics, Crashlytics, Google Mobile Ads, Sentry, Mixpanel, Amplitude, or Facebook SDKs are present.
-- **Explicit First-Run `VpnService` Disclosure (`VpnDisclosureDialog.kt`)**:
-  - Before invoking `VpnService.prepare(context)`, `MainActivity.kt` presents a mandatory, blocking prominent disclosure dialog (`VpnDisclosureDialog.kt`) explaining how `Android VpnService` creates a local device-level tunnel (`tun0`) and routes traffic to the user's selected server.
-- **Consistency with `privacy-policy.md` & `play-store/data-safety-declaration.md`**:
-  - All profile data and preferences remain 100% on-device (`Data Shared: None`, `Data Collected: None`).
+### بخش ۵: امنیت Backend و سرور همراه (`server.ts`)
+پروژه دارای یک سرور Express در فایل `server.ts` برای محیط وب/پیش‌نمایش، بررسی پینگ و اتصال خودکار به GitHub است. بررسی خطبهخط `server.ts` یافتههای مهم زیر را نشان داد:
+1. **آسیبپذیری `SEC-007` (High — SSRF / پورت‌اسکن شبکه داخلی از طریق `/api/network/ping` و `/api/network/tunnel-check`)**:
+   - در `server.ts` خطوط ۸۲۶ تا ۸۸۰ (`/api/network/ping`) و خطوط ۸۸۳ تا ۹۳۳ (`/api/network/tunnel-check`)، سرور هر `host` و `port` (`1..65535`) دریافتی از کلاینت را بدون بررسی IPهای خصوصی/داخلی (`127.0.0.1`, `localhost`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254`, `::1`) مستقیماً با `socket.connect(port, rawHost)` باز میکند. این موضوع امکان اسکن پورتهای داخلی سرور میزبان (Blind SSRF via TCP Timing/Error) را فراهم میکند.
+2. **آسیبپذیری `SEC-008` (Medium — نگهداری توکن گیتهاب در متغیر سراسری حافظه `sessionGitHubToken`)**:
+   - در `server.ts` خط ۱۴ (`let sessionGitHubToken: string | null = null;`) و خط ۱۰۲، توکن گیتهاب در یک متغیر سراسری در پروسه Node.js ذخیره میشود. اگر چندین کاربر بهصورت همزمان به یک نمونه (Instance) مشترک از سرور وب متصل شوند، توکن در حافظه بین درخواستها مشترک خواهد بود.
+3. **آسیبپذیری `SEC-009` (Medium — عدم استفاده از پارامتر `state` در OAuth و استفاده از `'*'` در `postMessage`)**:
+   - در `server.ts` خطوط ۲۷۳ تا ۲۹۹ (`/api/auth/github/url`) پارامتر ضد-CSRF یعنی `state` تولید نمیشود و در خط ۳۵۲ (`window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*')`) از wildcard `'*'` استفاده شده است.
+4. **آسیبپذیری `SEC-010` (Low — نبود Rate Limiting و محدودیت بالای `15mb` روی JSON در تمام مسیرها)**:
+   - در `server.ts` خط ۱۵۶ (`app.use(express.json({ limit: '15mb' }))`) روی تمام مسیرها (حتی `/api/network/ping`) اعمال شده و هیچ میان‌افزار Rate Limiter روی مسیرهای شبکه و احراز هویت وجود ندارد.
 
 ---
 
-## 4. Automated Security Tests Executed
-
-The following automated JUnit 4 tests in `app/src/test/java/com/nexora/x/` verify the security controls and remediations:
-
-1. **`SingBoxEngineAndConfigTest.kt`**:
-   - `CredentialVaultCipher encrypts secrets with AES-256-GCM and ProfileMapper protects credentials at rest`: Verifies `ENCv1:` prefix, randomized 96-bit IV uniqueness across identical plaintexts, `ProfileMapper.toEntity()` ciphertext storage, `ProfileEntity.toString()` redaction (`***REDACTED***`), and `ProfileMapper.toDomain()` decryption round-trip.
-   - `CredentialVaultCipher rejects tampered AES-GCM ciphertext with SecurityException`: Verifies that modifying even 4 characters of the GCM authentication tag throws `SecurityException`.
-   - `SingBoxConfigGenerator maps VLESS Reality and XTLS flow with Phase 4 DNS bootstrap and gvisor stack`: Verifies `"inet4_address": "172.19.0.1/30"`, `"inet6_address": "fdfe:dcba:9876::1/126"`, `"stack": "gvisor"`, `"address_resolver": "dns-direct"`, and ensures `redactedSummary` contains zero secrets.
-   - `SingBoxConfigGenerator emits explicit MITM security warning when allowInsecure is enabled`: Verifies that `allowInsecure = true` populates a prominent MITM warning in `GeneratedSingBoxConfig.warnings`.
-   - `LogRedactor scrubs UUIDs, proxy URIs, JSON passwords, and custom secrets`: Verifies scrubbing of UUIDs, `vless://` URIs, JSON `"password"` values, and query tokens.
-2. **`ProfileParserAndValidatorTest.kt`**:
-   - Verifies strict host, port (`1..65535`), UUID, TLS/Reality public key, and Shadowsocks cipher validation across `vless://`, `vmess://`, `trojan://`, and `ss://` parsers.
+### بخش ۶: امنیت GitHub Actions و زنجیره تأمین (`CI/CD & Supply Chain`)
+1. **آسیبپذیری `SEC-006` (High — عدم مقایسه خودکار هش SHA-256 برای فایلهای دانلودشده در `fetch-libbox-aar.sh` و `android-apk.yml`)**:
+   - در `scripts/fetch-libbox-aar.sh` (خطوط ۳۹، ۴۵، ۵۱) و `.github/workflows/android-apk.yml` (خطوط ۷۷ و ۱۲۹ تا ۱۳۱)، فایلهای باینری خارجی (`SFA-1.10.7-universal.apk`، `libbox-1.3.11.aar`، `dex-tools-v2.4.zip` و `commandlinetools-linux-11076708_latest.zip`) با `curl -fL` دانلود میشوند اما هش SHA-256 هیچ‌یک از این فایلها با یک مقدار ثابت و پین‌شده مقایسه (`sha256sum -c`) نمیشود (در خط ۸۳ اسکریپت `fetch-libbox-aar.sh` هش فقط با `echo` چاپ میشود ولی اعتبارسنجی نمیشود).
+2. **مجوزهای Workflow و مدیریت Keystore**:
+   - در `.github/workflows/android-apk.yml` خط ۱۵ مجوز `permissions: contents: read` بهدرستی روی حداقل سطح دسترسی تنظیم شده است.
+   - در خطوط ۱۸۷ تا ۲۰۷، فایل Keystore از Secret به `/tmp/nexora-upload.jks` دیکد شده و در خط ۲۰۶ حذف میشود؛ بااینحال اگر گام `bundleRelease` در خط ۲۰۵ با خطا مواجه شود، بهدلیل `set -o pipefail` دستور `rm -f /tmp/nexora-upload.jks` در خط ۲۰۶ اجرا نمیشود (گرچه کانتینر GitHub Runner موقت است، استفاده از `trap 'rm -f /tmp/nexora-upload.jks' EXIT` امنتر است).
 
 ---
 
-## 5. Remaining Risks & Operational Considerations
+## ۴. امتیاز امنیتی نهایی (Security Score: **82 / 100**)
 
-1. **User-Imported `allowInsecure=1` Profiles (`LOW / USER-CONTROLLED`)**:
-   - Some self-hosted proxy operators use self-signed certificates and distribute links with `allowInsecure=1`. NEXORA X defaults `allowInsecure` to `false` and now displays an explicit MITM warning both in the Profile Editor (`AddProfileScreen.kt`) and in `SingBoxConfigGenerator.warnings` when a user explicitly enables it.
-2. **Rooted Device Physical Memory Inspection (`INHERENT PLATFORM LIMITATION`)**:
-   - While credentials at rest in SQLite are now encrypted with `AndroidKeyStore` AES-256-GCM (`CredentialVaultCipher`) and `active-config.json` is wiped immediately upon disconnect, an active VPN session must pass the decrypted configuration to `libbox.newService(configJson, platformInterface)` in process memory while the tunnel is running. On a rooted device with kernel/ptrace access, in-memory secrets of any running process can be inspected while active.
+### روش محاسبه امتیاز (Scoring Methodology)
+امتیاز پایه از **100** بر اساس ۷ حوزه وزن‌دار زیر محاسبه شده است:
 
----
+| حوزه امنیتی | وزن | امتیاز کسب‌شده | دلایل کسر امتیاز |
+| :--- | :---: | :---: | :--- |
+| **۱. رمزنگاری و امنیت داده در حالت سکون (Storage & Crypto)** | 20 | **16 / 20** | استفاده عالی از `AndroidKeyStore` AES-256-GCM و غیرفعال بودن Backup؛ کسر ۴ امتیاز بابت fallback خام در `catch` (`SEC-001`) و بلعیدن خطای GCM در `ProfileMapper` (`SEC-002`). |
+| **۲. امنیت تونل VPN، شبکه و TLS (VPN & Network)** | 25 | **21 / 25** | پیادهسازی صحیح `VpnService.protect(fd)`، حذف لوپ با `addDisallowedApplication`، پوشش IPv4+IPv6 و DoH؛ کسر ۴ امتیاز بابت باگ ترتیب `SNIHostName` روی IP و پرش از TLS در Stage D هنگام `allowInsecure` (`SEC-003`) و عدم قرائت مستقیم IPv6 از `TunOptions` (`SEC-004`). |
+| **۳. امنیت موتور `sing-box` و عدم نشت لاگ (Engine & Logging)** | 15 | **12 / 15** | عدم وجود هرگونه `Log.d`/`println` و سانسور قوی در `LogRedactor`؛ کسر ۳ امتیاز بابت ذخیره `stderr.log` در `getExternalFilesDir` بدون عبور از `LogRedactor` (`SEC-005`) و escape ناقص کاراکترهای کنترلی JSON (`SEC-011`). |
+| **۴. امنیت پلتفرم اندروید و R8 (Platform & Resilience)** | 15 | **13 / 15** | `exported="false"` روی سرویس VPN، `FLAG_IMMUTABLE` روی تمام `PendingIntent`ها، مخفیسازی کلیپبورد (`EXTRA_IS_SENSITIVE`) و اعلان `VISIBILITY_PRIVATE`؛ کسر ۲ امتیاز بابت `-keep` گسترده در `proguard-rules.pro` (`SEC-012`). |
+| **۵. امنیت CI/CD و زنجیره تأمین (Supply Chain)** | 10 | **7 / 10** | کسر ۳ امتیاز بابت عدم مقایسه خودکار هش SHA-256 فایلهای دانلودی در `fetch-libbox-aar.sh` و `android-apk.yml` (`SEC-006`). |
+| **۶. امنیت سرور همراه وب (`server.ts`)** | 10 | **6 / 10** | کسر ۴ امتیاز بابت امکان پورت‌اسکن داخلی در `/api/network/ping` (`SEC-007`) و متغیر سراسری `sessionGitHubToken` (`SEC-008`). |
+| **۷. حریم خصوصی و انطباق با Google Play (Privacy)** | 5 | **5 / 5** | نبود هیچ‌گونه SDK تبلیغاتی/ردیابی، دیالوگ شفاف `VpnDisclosureDialog` و تطابق کامل با سیاست حریم خصوصی. |
+| **جمع کل (Total Security Score)** | **100** | **80 + 2 = 82 / 100** | *(+2 امتیاز بابت پوشش تست واحد رمزنگاری و سانسور لاگ)* |
 
-## 6. Release Readiness Assessment
-
-**VERDICT: APPROVED FOR PRODUCTION & GOOGLE PLAY RELEASE (`v1.0.0`, `versionCode = 4`)**
-
-- All `HIGH`, `MEDIUM`, `LOW`, and `INFORMATIONAL` findings identified during the OWASP MASVS security audit have been remediated in source code and covered by unit tests.
-- No functionality was removed or simplified; all VLESS, VMess, Trojan, and Shadowsocks features, Phase 4 6-stage tunnel verification, and Google Play compliance disclosures remain intact.
+### مواردی که در این محیط تست نشدهاند (`Not Tested`)
+بهدلیل اجرای این ممیزی در محیط کانتینر ابری (بدون دستگاه فیزیکی اندروید و بدون اجرای محلی Gradle Daemon):
+1. **تست پویا (Dynamic / Runtime Instrumentation) روی دستگاه واقعی اندروید**: بررسی نشت واقعی پکتهای IPv6/DNS با Wireshark/`tcpdump` روی اینترفیسهای `tun0` و `wlan0` هنگام قطع ناگهانی Wi-Fi و سوییچ به Mobile Data (`Not Tested on Physical Device`).
+2. **اجرای محلی `./gradlew lintDebug` و MobSF روی فایل APK نهایی**: فایل APK در GitHub Actions ساخته میشود و در این کانتینر محلی تولید نشده است (`Not Tested Locally`).
+3. **بازرسی تاریخچه Git (`.git`)**: دایرکتوری کاری فعلی در کانتینر فاقد پوشه `.git` است (`fatal: not a git repository`)، بنابراین تاریخچه کامیتهای قبلی در مخزن ریموت گیتهاب از داخل این کانتینر قابل اسکن نبود (`Not Tested — No Local .git Directory`).

@@ -75,6 +75,8 @@ jobs:
             echo "No pre-installed sdkmanager found; installing commandlinetools-linux-11076708_latest.zip..."
             mkdir -p "${SDK_ROOT}/cmdline-tools"
             curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+            # SEC-006: Verify against Google's official repository2-3.xml checksum before extraction
+            echo "d313adb7aedccf6cf0cfca51ec180f0059f5f8f8  /tmp/cmdtools.zip" | sha1sum -c -
             unzip -q -o /tmp/cmdtools.zip -d "${SDK_ROOT}/cmdline-tools"
             mv "${SDK_ROOT}/cmdline-tools/cmdline-tools" "${SDK_ROOT}/cmdline-tools/latest"
             rm -f /tmp/cmdtools.zip
@@ -113,38 +115,17 @@ jobs:
           echo "${SDK_ROOT}/platform-tools" >> "$GITHUB_PATH"
           echo "${SDK_ROOT}/build-tools/${BUILD_TOOLS_VERSION}" >> "$GITHUB_PATH"
 
-      - name: 4. Assemble & Verify Official sing-box libbox.aar (v1.10.7)
+      - name: 4. Assemble & Verify Official sing-box libbox.aar (v1.10.7) with SHA-256 Integrity Check
         id: prepare_libbox_aar
         run: |
           set -euo pipefail
-          if [ -f "scripts/fetch-libbox-aar.sh" ]; then
-            chmod +x scripts/fetch-libbox-aar.sh
-            ./scripts/fetch-libbox-aar.sh
-          elif [ -f "app/libs/fetch-libbox-aar.sh" ]; then
-            chmod +x app/libs/fetch-libbox-aar.sh
-            ./app/libs/fetch-libbox-aar.sh
-          else
-            echo "Running inline reproducible assembly of app/libs/libbox.aar (v${SINGBOX_PINNED_VERSION})..."
-            mkdir -p app/libs /tmp/libbox-work/classes /tmp/libbox-work/aar/jni
-            curl -fL --retry 3 "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_PINNED_VERSION}/SFA-${SINGBOX_PINNED_VERSION}-universal.apk" -o /tmp/sfa.apk
-            curl -fL --retry 3 "https://raw.githubusercontent.com/singbox-android/libbox/1.3.11/libbox.aar" -o /tmp/gomobile.aar
-            curl -fL --retry 3 "https://github.com/pxb1988/dex2jar/releases/download/v2.4/dex-tools-v2.4.zip" -o /tmp/dex2jar.zip
-            unzip -q -o /tmp/dex2jar.zip -d /tmp
-            chmod +x /tmp/dex-tools-v2.4/*.sh
-            unzip -q /tmp/sfa.apk "classes.dex" "lib/*/libbox.so" -d /tmp/libbox-work/sfa
-            /tmp/dex-tools-v2.4/d2j-dex2jar.sh --force -o /tmp/libbox-work/sfa-classes.jar /tmp/libbox-work/sfa/classes.dex
-            (cd /tmp/libbox-work/classes && jar xf /tmp/libbox-work/sfa-classes.jar io/nekohasekai/libbox)
-            unzip -p /tmp/gomobile.aar classes.jar > /tmp/libbox-work/gomobile-classes.jar
-            (cd /tmp/libbox-work/classes && jar xf /tmp/libbox-work/gomobile-classes.jar go)
-            jar cf /tmp/libbox-work/aar/classes.jar -C /tmp/libbox-work/classes io -C /tmp/libbox-work/classes go
-            for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
-              mkdir -p "/tmp/libbox-work/aar/jni/${ABI}"
-              cp "/tmp/libbox-work/sfa/lib/${ABI}/libbox.so" "/tmp/libbox-work/aar/jni/${ABI}/libbox.so"
-            done
-            printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.nekohasekai.libbox"><uses-sdk android:minSdkVersion="21"/></manifest>\n' > /tmp/libbox-work/aar/AndroidManifest.xml
-            : > /tmp/libbox-work/aar/R.txt
-            (cd /tmp/libbox-work/aar && jar cfM "${GITHUB_WORKSPACE}/app/libs/libbox.aar" AndroidManifest.xml R.txt classes.jar jni)
+          if [ ! -f "scripts/fetch-libbox-aar.sh" ]; then
+            echo "::error::Missing scripts/fetch-libbox-aar.sh — refusing unverified fallback download (SEC-006 fail-closed)."
+            exit 1
           fi
+          chmod +x scripts/fetch-libbox-aar.sh
+          ./scripts/fetch-libbox-aar.sh --self-test
+          ./scripts/fetch-libbox-aar.sh
 
           test -s "app/libs/libbox.aar"
           unzip -l "app/libs/libbox.aar" | grep -E "classes\.jar|jni/(arm64-v8a|armeabi-v7a|x86_64|x86)/libbox\.so"
@@ -170,19 +151,33 @@ jobs:
           ./gradlew --version
           ./gradlew clean
 
-      - name: 8. Run Unit Tests (./gradlew testDebugUnitTest)
+      - name: 7b. Compile Debug Kotlin (./gradlew :app:compileDebugKotlin)
+        id: compile_debug_kotlin
+        run: |
+          set -o pipefail
+          echo "Compiling NEXORA X Debug Kotlin sources (:app:compileDebugKotlin)..."
+          ./gradlew :app:compileDebugKotlin --stacktrace 2>&1 | tee -a gradle-build.log
+
+      - name: 8. Run Unit Tests (./gradlew :app:testDebugUnitTest)
         id: unit_tests
         run: |
           set -o pipefail
-          echo "Running NEXORA X unit test suites (Phase 1–4 + Production v1.0.0 + libbox v1.10.7 classpath check)..."
-          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle-build.log
+          echo "Running NEXORA X unit test suites (Phase 1–4 + Production v1.0.0 + Security Audit + libbox v1.10.7 classpath check)..."
+          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee -a gradle-build.log
 
-      - name: 9. Build Android Debug APK (./gradlew assembleDebug)
+      - name: 8b. Run Android Lint (./gradlew :app:lintDebug)
+        id: lint_debug
+        run: |
+          set -o pipefail
+          echo "Running Android Lint checks (:app:lintDebug)..."
+          ./gradlew :app:lintDebug --stacktrace 2>&1 | tee -a gradle-build.log
+
+      - name: 9. Build Android Debug APK (./gradlew :app:assembleDebug)
         id: assemble_debug
         run: |
           set -o pipefail
           echo "Assembling NEXORA X Debug APK (:app:assembleDebug)..."
-          ./gradlew assembleDebug --stacktrace 2>&1 | tee -a gradle-build.log
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee -a gradle-build.log
 
       - name: 9b. Prepare Optional Release Signing & Build Google Play Release AAB (./gradlew bundleRelease)
         id: bundle_release
@@ -193,6 +188,7 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           set -o pipefail
+          trap 'rm -f /tmp/nexora-upload.jks' EXIT
           if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ] && [ -n "${RELEASE_STORE_PASSWORD:-}" ] && [ -n "${RELEASE_KEY_ALIAS:-}" ] && [ -n "${RELEASE_KEY_PASSWORD:-}" ]; then
             echo "Release signing secrets detected; decoding upload keystore to /tmp/nexora-upload.jks..."
             echo "${RELEASE_KEYSTORE_BASE64}" | base64 --decode > /tmp/nexora-upload.jks
@@ -203,7 +199,6 @@ jobs:
             echo "RELEASE_SIGNED=false" >> "$GITHUB_ENV"
           fi
           ./gradlew bundleRelease --stacktrace 2>&1 | tee -a gradle-build.log
-          rm -f /tmp/nexora-upload.jks
 
       - name: 10. Verify APK & AAB Outputs, Native libbox.so ABIs & Generate build-info.txt
         id: verify_and_metadata
@@ -237,6 +232,15 @@ jobs:
             AAB_SHA256=$(sha256sum "${AAB_FILE}" | awk '{print $1}')
           fi
 
+          LINT_XML="app/build/reports/lint-results-debug.xml"
+          LINT_HTML="app/build/reports/lint-results-debug.html"
+          LINT_ERRORS="0"
+          LINT_WARNINGS="0"
+          if [ -f "${LINT_XML}" ]; then
+            LINT_ERRORS=$(grep -c 'severity="Error"' "${LINT_XML}" || true)
+            LINT_WARNINGS=$(grep -c 'severity="Warning"' "${LINT_XML}" || true)
+          fi
+
           APK_FILENAME=$(basename "${APK_FILE}")
           APK_BYTES=$(wc -c < "${APK_FILE}" | tr -d ' ')
           APK_SHA256=$(sha256sum "${APK_FILE}" | awk '{print $1}')
@@ -255,13 +259,14 @@ jobs:
           Build Date (UTC) : ${BUILD_DATE_UTC}
           Git Commit SHA   : ${GITHUB_SHA}
           Git Ref / Branch : ${GITHUB_REF_NAME}
-          Compile / Target : SDK ${COMPILE_SDK} (Min SDK 26)
+          Compile / Target : SDK ${COMPILE_SDK} (Build-Tools ${BUILD_TOOLS_VERSION}, Min SDK 26)
           Version Name     : ${VERSION_NAME} (Debug: ${VERSION_NAME}-debug)
           Version Code     : ${VERSION_CODE}
           sing-box Version : ${SINGBOX_VERSION} (io.nekohasekai.libbox, app/libs/libbox.aar)
           Native ABIs      : arm64-v8a, armeabi-v7a, x86_64, x86 (libbox.so verified)
           JDK Version      : ${JAVA_VERSION} (Eclipse Temurin)
           Gradle Version   : ${GRADLE_VERSION}
+          Lint Summary     : ${LINT_ERRORS} Errors, ${LINT_WARNINGS} Warnings (${LINT_HTML})
           Debug APK File   : ${APK_FILE} (${APK_BYTES} bytes)
           Debug APK SHA256 : ${APK_SHA256}
           Release AAB File : ${AAB_FILE:-Not generated} (${AAB_BYTES} bytes, Signed: ${RELEASE_SIGNED:-false})
@@ -273,18 +278,19 @@ jobs:
           cat build-info.txt
 
           {
-            echo "### NEXORA X Android Build Succeeded (Debug APK + Release AAB)"
+            echo "### NEXORA X Android Build Succeeded (Debug APK + Release AAB + Lint)"
             echo ""
             echo "| Field | Value |"
             echo "| :--- | :--- |"
             echo "| **App Name** | \`NEXORA X\` |"
             echo "| **Package Name** | \`com.nexora.x\` (\`com.nexora.x.debug\`) |"
-            echo "| **Compile / Target SDK** | \`${COMPILE_SDK}\` (Min SDK \`26\`) |"
+            echo "| **Compile / Target SDK** | \`${COMPILE_SDK}\` (Build-Tools \`${BUILD_TOOLS_VERSION}\`, Min SDK \`26\`) |"
             echo "| **Version Name** | \`${VERSION_NAME}\` (Code \`${VERSION_CODE}\`) |"
             echo "| **sing-box Version** | \`${SINGBOX_VERSION}\` (\`io.nekohasekai.libbox\` + \`libbox.so\`) |"
             echo "| **Native ABIs** | \`arm64-v8a\`, \`armeabi-v7a\`, \`x86_64\`, \`x86\` |"
             echo "| **Git Commit SHA** | \`${GITHUB_SHA}\` |"
             echo "| **Build Date (UTC)** | \`${BUILD_DATE_UTC}\` |"
+            echo "| **Lint Summary** | \`${LINT_ERRORS}\` Errors, \`${LINT_WARNINGS}\` Warnings |"
             echo "| **Debug APK** | \`${APK_FILE}\` (\`${APK_BYTES}\` bytes, SHA-256: \`${APK_SHA256}\`) |"
             echo "| **Release AAB** | \`${AAB_FILE:-N/A}\` (\`${AAB_BYTES}\` bytes, Signed: \`${RELEASE_SIGNED:-false}\`) |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -311,6 +317,18 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+      - name: 11c. Upload NEXORA-X-LINT-REPORTS Artifact (Android Lint HTML/XML + Unit Test Reports)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-X-LINT-REPORTS
+          path: |
+            app/build/reports/lint-results-debug.*
+            app/build/reports/tests/testDebugUnitTest/**
+            build-info.txt
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: 12. Diagnose Build or Test Failure
         if: failure()
         run: |
@@ -327,10 +345,18 @@ jobs:
             FAILED_TASK="4. Assemble & Verify Official sing-box libbox.aar (v1.10.7)"
             CAUSE_EXPLANATION="Failed to download or assemble app/libs/libbox.aar from official SagerNet/sing-box v1.10.7 release."
             CONCRETE_FIX="Verify network connectivity to github.com/SagerNet/sing-box/releases/tag/v1.10.7."
+          elif [ "${{ steps.compile_debug_kotlin.outcome }}" == "failure" ]; then
+            FAILED_TASK=":app:compileDebugKotlin"
+            CAUSE_EXPLANATION="Kotlin compilation failed in app/src/main/java."
+            CONCRETE_FIX="Inspect step '7b. Compile Debug Kotlin' for unresolved symbols or type mismatches."
           elif [ "${{ steps.unit_tests.outcome }}" == "failure" ]; then
             FAILED_TASK=":app:testDebugUnitTest"
             CAUSE_EXPLANATION="One or more JUnit 4 unit tests in app/src/test/ failed, or test compilation encountered a Kotlin/KSP error."
             CONCRETE_FIX="Inspect the stacktrace under step '8. Run Unit Tests' or app/build/reports/tests/testDebugUnitTest/index.html."
+          elif [ "${{ steps.lint_debug.outcome }}" == "failure" ]; then
+            FAILED_TASK=":app:lintDebug"
+            CAUSE_EXPLANATION="Android Lint encountered a fatal configuration or analysis error."
+            CONCRETE_FIX="Inspect app/build/reports/lint-results-debug.html in the NEXORA-X-LINT-REPORTS artifact."
           elif [ "${{ steps.assemble_debug.outcome }}" == "failure" ]; then
             FAILED_TASK=":app:assembleDebug"
             CAUSE_EXPLANATION="Android Debug APK compilation, KSP (Room/Hilt) code generation, or resource packaging failed."
