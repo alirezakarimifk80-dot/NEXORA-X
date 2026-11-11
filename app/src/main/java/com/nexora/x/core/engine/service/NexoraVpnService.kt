@@ -132,6 +132,14 @@ class NexoraVpnService : VpnService(), NexoraTunPlatformCallbacks {
             .addRoute("0.0.0.0", 0)
             .addDnsServer(dnsAddress)
 
+        // OWASP MASVS-NETWORK-1 / VPN Traffic Security: Capture IPv6 default route (::/0)
+        // alongside IPv4 so dual-stack Wi-Fi / cellular interfaces cannot leak IPv6 traffic
+        // directly outside the TUN interface.
+        runCatching {
+            builder.addAddress("fdfe:dcba:9876::1", 126)
+            builder.addRoute("::", 0)
+        }
+
         if (ipv4Address == "172.19.0.1" && dnsAddress != "172.19.0.2") {
             runCatching { builder.addDnsServer("172.19.0.2") }
         }

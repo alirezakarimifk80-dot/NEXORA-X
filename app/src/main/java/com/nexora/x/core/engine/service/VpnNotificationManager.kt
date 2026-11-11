@@ -82,6 +82,15 @@ object VpnNotificationManager {
 
         val contentText = "$safeProfileLabel · $speedLine"
 
+        val publicLockscreenNotification = NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText("VPN session status active")
+            .setOngoing(state == EngineState.STARTING || state.isTunnelRunning)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+
         return NotificationCompat.Builder(context, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
@@ -89,7 +98,8 @@ object VpnNotificationManager {
             .setOngoing(state == EngineState.STARTING || state.isTunnelRunning)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicLockscreenNotification)
             .setContentIntent(openAppPendingIntent)
             .addAction(
                 android.R.drawable.ic_media_pause,

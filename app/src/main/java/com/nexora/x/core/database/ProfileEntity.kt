@@ -7,15 +7,17 @@ import androidx.room.PrimaryKey
 import com.nexora.x.core.model.ProfileType
 
 /**
- * Room Database Entity representing a persisted proxy profile in NEXORA X Phase 2.
+ * Room Database Entity representing a persisted proxy profile in NEXORA X.
  *
- * Security Note:
- * - [toString] redacts [credential] so UUIDs, passwords, or secrets are never exposed in logs.
- * - Full raw import links are never stored to avoid duplicating sensitive tokens in plain text.
- * - Local Storage Security Limitation: Room SQLite database resides in the application's private
- *   sandbox (`/data/data/com.nexora.x/databases/nexora_profiles.db`), protected by Android UID
- *   isolation on non-rooted devices. For hardware-backed encryption at rest, SQLCipher /
- *   AndroidKeyStore key wrapping is documented for Phase 3 hardening.
+ * Security Hardening (`MASVS-STORAGE-1` & `MASVS-STORAGE-2`):
+ * - [credential], [realityPublicKey], and [realityShortId] are encrypted at rest using hardware-backed
+ *   `AndroidKeyStore` AES-256-GCM (`ENCv1:...`) via [com.nexora.x.core.security.CredentialVaultCipher]
+ *   inside [ProfileMapper].
+ * - [toString] redacts [credential], [realityPublicKey], and [realityShortId] so secrets are never
+ *   exposed in diagnostic logs or stack traces.
+ * - Full raw import links are never stored to avoid duplicating sensitive tokens.
+ * - Cloud backup and device transfer are explicitly disabled (`android:allowBackup="false"`,
+ *   `backup_rules.xml`, and `data_extraction_rules.xml`).
  */
 @Entity(
     tableName = "profiles",
@@ -106,6 +108,6 @@ data class ProfileEntity(
 ) {
     override fun toString(): String {
         return "ProfileEntity(id=$id, displayName=$displayName, protocol=${protocol.name}, " +
-            "server=$serverAddress:$port, credential=[REDACTED])"
+            "server=$serverAddress:$port, credential=[REDACTED], realityPublicKey=[REDACTED], realityShortId=[REDACTED])"
     }
 }

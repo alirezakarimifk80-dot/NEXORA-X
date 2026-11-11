@@ -1,26 +1,32 @@
 package com.nexora.x.core.engine
 
+import com.nexora.x.core.database.ProfileMapper
 import com.nexora.x.core.model.Profile
 import com.nexora.x.core.model.ProfileType
 import com.nexora.x.core.model.TlsConfig
 import com.nexora.x.core.model.TransportConfig
+import com.nexora.x.core.security.CredentialVaultCipher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
 /**
- * Phase 3 & Phase 4 Unit Test Suite covering:
+ * Phase 3, Phase 4 & Security Audit Unit Test Suite covering:
  * - [SingBoxConfigGenerator]: VLESS, VMess, Trojan, and Shadowsocks protocol mapping,
  *   DNS bootstrap rule (`"outbound": "any", "server": "dns-direct"`), `"address_resolver": "dns-direct"`,
- *   `"stack": "gvisor"`, and `"packet_encoding": "xudp"`.
+ *   `"stack": "gvisor"`, `"inet6_address": "fdfe:dcba:9876::1/126"`, `"packet_encoding": "xudp"`,
+ *   and `allowInsecure` MITM warning generation.
+ * - [CredentialVaultCipher] & [ProfileMapper]: Hardware-backed AES-256-GCM encryption at rest
+ *   for `credential`, `realityPublicKey`, and `realityShortId`, tamper rejection, and `toString()` redaction.
  * - Invalid profile rejection before engine start.
  * - [LogRedactor]: UUID, password, Reality key, and URI link redaction.
  * - [SingBoxEngine]: Deterministic state machine transitions (`DISCONNECTED`, `PREPARING`,
  *   `REQUESTING_PERMISSION`, `STARTING`, `VPN_ACTIVE`, `CONNECTIVITY_CHECK`, `INTERNET_AVAILABLE`,
- *   `NO_INTERNET`, `STOPPING`, `ERROR`), duplicate start/stop prevention, andStage B tracking.
+ *   `NO_INTERNET`, `STOPPING`, `ERROR`), duplicate start/stop prevention, and Stage B tracking.
  */
 class SingBoxEngineAndConfigTest {
 
@@ -65,8 +71,10 @@ class SingBoxEngineAndConfigTest {
         assertTrue(generated.rawJson.contains("\"short_id\": \"01ab\""))
         assertTrue(generated.rawJson.contains("\"type\": \"tun\""))
 
-        // Phase 4 connectivity invariants: gvisor stack + DNS bootstrap rule + direct DNS resolver
+        // Phase 4 connectivity + SEC-03 IPv6 leak prevention invariants
         assertTrue(generated.rawJson.contains("\"stack\": \"gvisor\""))
+        assertTrue(generated.rawJson.contains("\"inet4_address\": \"172.19.0.1/30\""))
+        assertTrue(generated.rawJson.contains("\"inet6_address\": \"fdfe:dcba:9876::1/126\""))
         assertTrue(generated.rawJson.contains("\"address_resolver\": \"dns-direct\""))
         assertTrue(generated.rawJson.contains("\"outbound\": \"any\""))
         assertTrue(generated.rawJson.contains("\"server\": \"dns-direct\""))
@@ -145,6 +153,95 @@ class SingBoxEngineAndConfigTest {
             updatedAtEpochMillis = 1000L
         )
         configGenerator.generateAndValidate(invalidReality)
+    }
+
+    @Test
+    fun `SingBoxConfigGenerator emits explicit MITM security warning when allowInsecure is enabled`() {
+        val insecureProfile = Profile(
+            id = "p-insecure",
+            displayName = "Self-Signed Node",
+            protocol = ProfileType.TROJAN,
+            serverAddress = "selfsigned.nexora.net",
+            port = 443,
+            credential = "TrojanSecretPass123",
+            securityMethod = "tls",
+            tlsConfig = TlsConfig(
+                enabled = true,
+                securityMode = "tls",
+                sni = "selfsigned.nexora.net",
+                allowInsecure = true
+            ),
+            createdAtEpochMillis = 1000L,
+            updatedAtEpochMillis = 1000L
+        )
+        val generated = configGenerator.generateAndValidate(insecureProfile)
+        assertTrue(
+            "Expected explicit MITM warning when allowInsecure is enabled",
+            generated.warnings.any { it.contains("MITM") && it.contains("allowInsecure") }
+        )
+    }
+
+    @Test
+    fun `CredentialVaultCipher encrypts secrets with AES-256-GCM and ProfileMapper protects credentials at rest`() {
+        val rawUuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+        val cipher1 = CredentialVaultCipher.encryptForStorage(rawUuid)
+        val cipher2 = CredentialVaultCipher.encryptForStorage(rawUuid)
+
+        assertTrue(CredentialVaultCipher.isEncryptedPayload(cipher1))
+        assertFalse(cipher1.contains(rawUuid))
+        // Distinct 96-bit IVs produce distinct ciphertexts for identical plaintexts
+        assertNotEquals(cipher1, cipher2)
+        assertEquals(rawUuid, CredentialVaultCipher.decryptFromStorage(cipher1))
+        assertEquals(rawUuid, CredentialVaultCipher.decryptFromStorage(cipher2))
+
+        // Backward-compatible legacy plaintext fallback
+        assertEquals(rawUuid, CredentialVaultCipher.decryptFromStorage(rawUuid))
+
+        // ProfileMapper.toEntity must store ENCv1 ciphertext, never raw UUID or Reality keys
+        val domainProfile = Profile(
+            id = "sec-01-test",
+            displayName = "Encrypted Vault Node",
+            protocol = ProfileType.VLESS,
+            serverAddress = "vault.nexora.net",
+            port = 443,
+            credential = rawUuid,
+            securityMethod = "none",
+            tlsConfig = TlsConfig(
+                enabled = true,
+                securityMode = "reality",
+                sni = "www.cloudflare.com",
+                realityPublicKey = "SecretRealityPublicKeyXYZ",
+                realityShortId = "deadbeef"
+            ),
+            createdAtEpochMillis = 1000L,
+            updatedAtEpochMillis = 1000L
+        )
+        val entity = ProfileMapper.toEntity(domainProfile)
+        assertTrue(CredentialVaultCipher.isEncryptedPayload(entity.credential))
+        assertTrue(CredentialVaultCipher.isEncryptedPayload(entity.realityPublicKey))
+        assertTrue(CredentialVaultCipher.isEncryptedPayload(entity.realityShortId))
+        assertFalse(entity.credential.contains(rawUuid))
+        assertFalse(entity.realityPublicKey.contains("SecretRealityPublicKeyXYZ"))
+
+        // ProfileEntity.toString() must redact all sensitive fields
+        val entityString = entity.toString()
+        assertFalse(entityString.contains(rawUuid))
+        assertFalse(entityString.contains(entity.credential))
+        assertTrue(entityString.contains("***REDACTED***"))
+
+        // ProfileMapper.toDomain() must transparently decrypt back to exact domain values
+        val restored = ProfileMapper.toDomain(entity, selectedProfileId = "sec-01-test")
+        assertEquals(rawUuid, restored.credential)
+        assertEquals("SecretRealityPublicKeyXYZ", restored.tlsConfig.realityPublicKey)
+        assertEquals("deadbeef", restored.tlsConfig.realityShortId)
+        assertTrue(restored.isSelected)
+    }
+
+    @Test(expected = SecurityException::class)
+    fun `CredentialVaultCipher rejects tampered AES-GCM ciphertext with SecurityException`() {
+        val encrypted = CredentialVaultCipher.encryptForStorage("TopSecretTrojanPassword")
+        val tampered = encrypted.dropLast(4) + "AAAA"
+        CredentialVaultCipher.decryptFromStorage(tampered)
     }
 
     @Test
@@ -252,3 +349,4 @@ class SingBoxEngineAndConfigTest {
 
     private class TestContextStub : android.content.ContextWrapper(null)
 }
+

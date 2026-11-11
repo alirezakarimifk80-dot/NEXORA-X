@@ -76,11 +76,14 @@ mkdir -p "${WORK_DIR}/aar/jni"
 jar cf "${WORK_DIR}/aar/classes.jar" -C "${WORK_DIR}/classes" io -C "${WORK_DIR}/classes" go
 
 for ABI in arm64-v8a armeabi-v7a x86_64 x86; do
-  if [ -f "${WORK_DIR}/sfa/lib/${ABI}/libbox.so" ]; then
+  if [ -s "${WORK_DIR}/sfa/lib/${ABI}/libbox.so" ]; then
     mkdir -p "${WORK_DIR}/aar/jni/${ABI}"
     cp "${WORK_DIR}/sfa/lib/${ABI}/libbox.so" "${WORK_DIR}/aar/jni/${ABI}/libbox.so"
+    if command -v sha256sum >/dev/null 2>&1; then
+      echo "[libbox-aar] Verified ABI ${ABI}: $(sha256sum "${WORK_DIR}/aar/jni/${ABI}/libbox.so" | awk '{print $1}')"
+    fi
   else
-    echo "[libbox-aar] ERROR: Missing native library lib/${ABI}/libbox.so in official release!" >&2
+    echo "[libbox-aar] ERROR: Missing or empty native library lib/${ABI}/libbox.so in official release!" >&2
     exit 1
   fi
 done

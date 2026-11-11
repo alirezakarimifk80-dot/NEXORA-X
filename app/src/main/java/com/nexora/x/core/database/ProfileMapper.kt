@@ -3,9 +3,15 @@ package com.nexora.x.core.database
 import com.nexora.x.core.model.Profile
 import com.nexora.x.core.model.TlsConfig
 import com.nexora.x.core.model.TransportConfig
+import com.nexora.x.core.security.CredentialVaultCipher
 
 /**
  * Bidirectional mapper between [ProfileEntity] (Room persistence) and [Profile] (Domain model).
+ *
+ * Security Invariant (OWASP MASVS-STORAGE-1):
+ * - All sensitive secrets (`credential`, `realityPublicKey`, `realityShortId`) are encrypted via
+ *   [CredentialVaultCipher] (`AES-256-GCM` backed by `AndroidKeyStore`) in [toEntity] before
+ *   Room persists the row to SQLite, and decrypted transparently in [toDomain].
  */
 object ProfileMapper {
 
@@ -24,13 +30,23 @@ object ProfileMapper {
                 .filter { it.isNotEmpty() }
         }
 
+        val decryptedCredential = runCatching {
+            CredentialVaultCipher.decryptFromStorage(entity.credential)
+        }.getOrDefault("")
+        val decryptedRealityPublicKey = runCatching {
+            CredentialVaultCipher.decryptFromStorage(entity.realityPublicKey)
+        }.getOrDefault("")
+        val decryptedRealityShortId = runCatching {
+            CredentialVaultCipher.decryptFromStorage(entity.realityShortId)
+        }.getOrDefault("")
+
         return Profile(
             id = entity.id,
             displayName = entity.displayName,
             protocol = entity.protocol,
             serverAddress = entity.serverAddress,
             port = entity.port,
-            credential = entity.credential,
+            credential = decryptedCredential,
             securityMethod = entity.securityMethod,
             alterId = entity.alterId,
             tlsConfig = TlsConfig(
@@ -40,8 +56,8 @@ object ProfileMapper {
                 alpn = entity.alpn,
                 fingerprint = entity.fingerprint,
                 allowInsecure = entity.allowInsecure,
-                realityPublicKey = entity.realityPublicKey,
-                realityShortId = entity.realityShortId
+                realityPublicKey = decryptedRealityPublicKey,
+                realityShortId = decryptedRealityShortId
             ),
             transportConfig = TransportConfig(
                 networkType = entity.networkType,
@@ -64,13 +80,17 @@ object ProfileMapper {
             .filter { it.isNotEmpty() }
             .joinToString(WARNING_DELIMITER)
 
+        val encryptedCredential = CredentialVaultCipher.encryptForStorage(domain.credential)
+        val encryptedRealityPublicKey = CredentialVaultCipher.encryptForStorage(domain.tlsConfig.realityPublicKey)
+        val encryptedRealityShortId = CredentialVaultCipher.encryptForStorage(domain.tlsConfig.realityShortId)
+
         return ProfileEntity(
             id = domain.id,
             displayName = domain.displayName,
             protocol = domain.protocol,
             serverAddress = domain.serverAddress,
             port = domain.port,
-            credential = domain.credential,
+            credential = encryptedCredential,
             securityMethod = domain.securityMethod,
             alterId = domain.alterId,
             tlsEnabled = domain.tlsConfig.enabled,
@@ -79,8 +99,8 @@ object ProfileMapper {
             alpn = domain.tlsConfig.alpn,
             fingerprint = domain.tlsConfig.fingerprint,
             allowInsecure = domain.tlsConfig.allowInsecure,
-            realityPublicKey = domain.tlsConfig.realityPublicKey,
-            realityShortId = domain.tlsConfig.realityShortId,
+            realityPublicKey = encryptedRealityPublicKey,
+            realityShortId = encryptedRealityShortId,
             networkType = domain.transportConfig.networkType,
             transportHost = domain.transportConfig.host,
             transportPath = domain.transportConfig.path,
@@ -93,3 +113,4 @@ object ProfileMapper {
         )
     }
 }
+

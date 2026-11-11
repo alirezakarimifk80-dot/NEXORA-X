@@ -498,6 +498,17 @@ fun AddProfileScreen(
                         onCheckedChange = viewModel::onAllowInsecureChanged
                     )
                 }
+
+                if (uiState.allowInsecure) {
+                    Text(
+                        text = "Security Warning: Disabling TLS peer certificate verification ('insecure': true) allows untrusted or self-signed certificates and exposes traffic to active man-in-the-middle (MITM) interception.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NexoraColors.StatusWarningAmber,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

@@ -60,6 +60,13 @@ class SingBoxConfigGenerator @Inject constructor() {
 
         val warnings = mutableListOf<String>()
         warnings.addAll(profile.unsupportedWarnings)
+        val secMode = profile.tlsConfig.securityMode.lowercase().ifBlank { "none" }
+        if ((profile.tlsConfig.enabled || secMode != "none") && profile.tlsConfig.allowInsecure) {
+            warnings.add(
+                "SECURITY WARNING: 'allowInsecure' ('insecure': true) is enabled for this profile. " +
+                    "TLS peer certificate verification is disabled, exposing tunnel traffic to active man-in-the-middle (MITM) interception."
+            )
+        }
 
         val outboundJson = buildProxyOutboundJson(profile)
         val fullJson = buildString {
@@ -100,6 +107,7 @@ class SingBoxConfigGenerator @Inject constructor() {
             append("      \"tag\": \"tun-in\",\n")
             append("      \"interface_name\": \"tun0\",\n")
             append("      \"inet4_address\": \"172.19.0.1/30\",\n")
+            append("      \"inet6_address\": \"fdfe:dcba:9876::1/126\",\n")
             append("      \"mtu\": 1500,\n")
             append("      \"auto_route\": true,\n")
             append("      \"strict_route\": true,\n")
@@ -145,7 +153,7 @@ class SingBoxConfigGenerator @Inject constructor() {
         val net = profile.transportConfig.networkType.lowercase().ifBlank { "tcp" }
         val sec = profile.tlsConfig.securityMode.lowercase().ifBlank { "none" }
         val summary =
-            "VALIDATED · ${profile.protocol.displayName} -> ${profile.serverAddress}:${profile.port} (transport=$net, security=$sec, stack=gvisor, dns=bootstrap+doh, tun=172.19.0.1/30)"
+            "VALIDATED · ${profile.protocol.displayName} -> ${profile.serverAddress}:${profile.port} (transport=$net, security=$sec, stack=gvisor, dns=bootstrap+doh, tun=172.19.0.1/30+ipv6)"
 
         return GeneratedSingBoxConfig(
             rawJson = fullJson,

@@ -31,8 +31,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.PersistableBundle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -71,6 +76,7 @@ fun ServersScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
 
     // Delete Confirmation Modal
@@ -331,7 +337,16 @@ fun ServersScreen(
                                 onDuplicate = { viewModel.onDuplicateProfile(profile) },
                                 onCopyLink = {
                                     val uri = viewModel.buildShareableUri(profile)
-                                    clipboardManager.setText(AnnotatedString(uri))
+                                    val systemClipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    if (systemClipboard != null) {
+                                        val clip = ClipData.newPlainText("NEXORA X Profile Link", uri)
+                                        clip.description.extras = PersistableBundle().apply {
+                                            putBoolean("android.content.extra.IS_SENSITIVE", true)
+                                        }
+                                        systemClipboard.setPrimaryClip(clip)
+                                    } else {
+                                        clipboardManager.setText(AnnotatedString(uri))
+                                    }
                                 },
                                 onDelete = { viewModel.onRequestDeleteProfile(profile) }
                             )

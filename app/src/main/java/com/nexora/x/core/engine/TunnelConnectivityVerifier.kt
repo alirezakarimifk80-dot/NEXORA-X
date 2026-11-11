@@ -11,8 +11,10 @@ import java.net.SocketTimeoutException
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLParameters
+import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 
@@ -166,10 +168,19 @@ class TunnelConnectivityVerifier @Inject constructor() {
                         sslSocket.soTimeout = STAGE_D_TIMEOUT_MS
                         runCatching {
                             val params: SSLParameters = sslSocket.sslParameters
+                            params.endpointIdentificationAlgorithm = "HTTPS"
                             params.serverNames = listOf(SNIHostName(sniHost))
                             sslSocket.sslParameters = params
                         }
                         sslSocket.startHandshake()
+                        // OWASP MASVS-NETWORK-1: Explicitly verify RFC 2818/6125 certificate hostname match
+                        val hostnameVerified = HttpsURLConnection.getDefaultHostnameVerifier()
+                            .verify(sniHost, sslSocket.session)
+                        if (!hostnameVerified) {
+                            throw SSLPeerUnverifiedException(
+                                "TLS peer certificate does not match expected SNI hostname '$sniHost'"
+                            )
+                        }
                     }
                 }
 
