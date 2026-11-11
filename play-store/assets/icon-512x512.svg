@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#050812" />
+      <stop offset="55%" stop-color="#0B1124" />
+      <stop offset="100%" stop-color="#131B38" />
+    </linearGradient>
+    <linearGradient id="accentCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="100%" stop-color="#00BBF9" />
+    </linearGradient>
+    <linearGradient id="accentPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9B5DE5" />
+      <stop offset="100%" stop-color="#6D28D9" />
+    </linearGradient>
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.28" />
+      <stop offset="65%" stop-color="#7C3AED" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#050812" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Full-bleed 512x512 Google Play Icon Canvas -->
+  <rect width="512" height="512" fill="url(#bgGrad)" />
+  <circle cx="256" cy="256" r="220" fill="url(#coreGlow)" />
+
+  <!-- Precision Radar Grid Ring -->
+  <circle cx="256" cy="256" r="188" fill="none" stroke="#1E293B" stroke-width="2" />
+  <circle cx="256" cy="256" r="154" fill="none" stroke="url(#accentPurple)" stroke-width="2.5" stroke-dasharray="14 10" opacity="0.65" />
+
+  <!-- Outer Hexagonal Tunnel Shield -->
+  <polygon
+    points="256,64 422,160 422,352 256,448 90,352 90,160"
+    fill="#090E1E"
+    fill-opacity="0.82"
+    stroke="url(#accentCyan)"
+    stroke-width="6"
+    stroke-linejoin="round"
+  />
+
+  <!-- Inner Geometric X / N Vector Core -->
+  <path
+    d="M164 344 L164 168 L256 260 L348 168 L348 344"
+    fill="none"
+    stroke="url(#accentPurple)"
+    stroke-width="22"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.9"
+  />
+  <path
+    d="M172 172 L340 340 M340 172 L172 340"
+    fill="none"
+    stroke="url(#accentCyan)"
+    stroke-width="24"
+    stroke-linecap="round"
+  />
+
+  <!-- Center Tunnel Node -->
+  <circle cx="256" cy="256" r="24" fill="#050812" stroke="#00F5D4" stroke-width="6" />
+  <circle cx="256" cy="256" r="9" fill="#00F5D4" />
+</svg>

@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
-    <include domain="sharedpref" path="."/>
+    <!--
+        Security Hardening:
+        Never back up Room SQLite database (nexora_profiles.db) or sing-box working directory
+        containing user proxy UUIDs, passwords, or Reality keys to unencrypted cloud storage.
+    -->
+    <exclude domain="database" path="." />
+    <exclude domain="file" path="singbox" />
+    <exclude domain="sharedpref" path="." />
 </full-backup-content>

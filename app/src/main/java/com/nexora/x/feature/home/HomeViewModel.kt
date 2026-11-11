@@ -42,6 +42,8 @@ data class HomeUiState(
     val uploadSpeedFormatted: String = "N/A",
     val totalDownloadedFormatted: String = "N/A",
     val totalUploadedFormatted: String = "N/A",
+    val hasAcceptedVpnDisclosure: Boolean = false,
+    val showVpnDisclosureDialog: Boolean = false,
     val actionBannerMessage: String? = null
 )
 
@@ -54,6 +56,7 @@ class HomeViewModel @Inject constructor(
 
     private val _actionBanner = MutableStateFlow<String?>(null)
     private val _latencyState = MutableStateFlow<LatencyCheckResult?>(null)
+    private val _showDisclosureDialog = MutableStateFlow(false)
     private var manualPingJob: Job? = null
 
     private val _vpnConsentIntentEvents = MutableSharedFlow<Intent>(extraBufferCapacity = 1)
@@ -71,12 +74,28 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private data class AuxiliaryHomeState(
+        val banner: String?,
+        val nowMillis: Long,
+        val latency: LatencyCheckResult?,
+        val acceptedDisclosure: Boolean,
+        val showDisclosureModal: Boolean
+    )
+
     private val auxiliaryUiFlow = combine(
         _actionBanner,
         tickerFlow,
-        _latencyState
-    ) { banner, nowMillis, latency ->
-        Triple(banner, nowMillis, latency)
+        _latencyState,
+        profileRepository.hasAcceptedVpnDisclosure,
+        _showDisclosureDialog
+    ) { banner, nowMillis, latency, acceptedDisclosure, showModal ->
+        AuxiliaryHomeState(
+            banner = banner,
+            nowMillis = nowMillis,
+            latency = latency,
+            acceptedDisclosure = acceptedDisclosure,
+            showDisclosureModal = showModal
+        )
     }
 
     val uiState: StateFlow<HomeUiState> = combine(
@@ -85,9 +104,9 @@ class HomeViewModel @Inject constructor(
         profileRepository.selectedProfile,
         profileRepository.totalProfileCount,
         auxiliaryUiFlow
-    ) { state, diag, selectedProfile, totalCount, (banner, nowMillis, latency) ->
+    ) { state, diag, selectedProfile, totalCount, aux ->
         val durationStr = if (state.isTunnelRunning && diag.connectedSinceEpochMillis != null) {
-            val elapsedSec = ((nowMillis - diag.connectedSinceEpochMillis) / 1000L).coerceAtLeast(0L)
+            val elapsedSec = ((aux.nowMillis - diag.connectedSinceEpochMillis) / 1000L).coerceAtLeast(0L)
             val hours = elapsedSec / 3600L
             val mins = (elapsedSec % 3600L) / 60L
             val secs = elapsedSec % 60L
@@ -96,8 +115,8 @@ class HomeViewModel @Inject constructor(
             "00:00:00"
         }
 
-        val matchingLatency = if (selectedProfile != null && latency?.profileId == selectedProfile.id) {
-            latency
+        val matchingLatency = if (selectedProfile != null && aux.latency?.profileId == selectedProfile.id) {
+            aux.latency
         } else {
             null
         }
@@ -116,7 +135,9 @@ class HomeViewModel @Inject constructor(
             uploadSpeedFormatted = VpnNotificationManager.formatBytesPerSec(stats.uplinkSpeedBytesPerSec),
             totalDownloadedFormatted = VpnNotificationManager.formatByteCount(stats.downlinkTotalBytes),
             totalUploadedFormatted = VpnNotificationManager.formatByteCount(stats.uplinkTotalBytes),
-            actionBannerMessage = banner ?: diag.lastRedactedError
+            hasAcceptedVpnDisclosure = aux.acceptedDisclosure,
+            showVpnDisclosureDialog = aux.showDisclosureModal,
+            actionBannerMessage = aux.banner ?: diag.lastRedactedError
         )
     }.stateIn(
         scope = viewModelScope,
@@ -184,6 +205,30 @@ class HomeViewModel @Inject constructor(
             return
         }
 
+        // Google Play VpnService Policy: Present prominent in-app disclosure before requesting VpnService consent
+        if (!uiState.value.hasAcceptedVpnDisclosure) {
+            _showDisclosureDialog.value = true
+            return
+        }
+
+        initiateVpnConnection()
+    }
+
+    fun onAcceptVpnDisclosureAndConnect() {
+        _showDisclosureDialog.value = false
+        viewModelScope.launch {
+            profileRepository.setVpnDisclosureAccepted(true)
+            initiateVpnConnection()
+        }
+    }
+
+    fun onDeclineVpnDisclosure() {
+        _showDisclosureDialog.value = false
+        _actionBanner.value =
+            "VPN Service disclosure must be accepted before NEXORA X can request Android VpnService permission."
+    }
+
+    private fun initiateVpnConnection() {
         val selected = uiState.value.selectedProfile
         when (val outcome = engineRepository.startVpn(selected)) {
             is EngineServiceController.StartTunnelOutcome.ServiceStarted -> {

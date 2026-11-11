@@ -51,14 +51,16 @@ import com.nexora.x.core.ui.components.RealProfileCard
 import com.nexora.x.core.ui.components.SectionHeader
 import com.nexora.x.core.ui.components.ServerCard
 import com.nexora.x.core.ui.components.TrafficMetricCard
+import com.nexora.x.core.ui.components.VpnDisclosureDialog
 import kotlinx.coroutines.flow.collectLatest
 
 /**
- * NEXORA X Phase 3 & Phase 4 Home Dashboard Screen.
+ * NEXORA X Production Home Dashboard Screen.
  * Connected to the real [com.nexora.x.core.engine.SingBoxEngine], [com.nexora.x.core.engine.NetworkLatencyChecker],
  * and Room [com.nexora.x.domain.repository.ProfileRepository].
  *
  * Displays:
+ * - Google Play VpnService Prominent Disclosure Dialog before first VpnService.prepare() invocation
  * - Selected profile name & protocol
  * - Periodic & on-demand TCP handshake LATENCY (`ms`, `Checking...`, `Timeout`, or `N/A`)
  * - Real connection state (`DISCONNECTED`, `PREPARING`, `REQUESTING_PERMISSION`, `STARTING`, `VPN ACTIVE`,
@@ -79,6 +81,15 @@ fun HomeScreen(
     val colorScheme = MaterialTheme.colorScheme
     val selectedProfile = uiState.selectedProfile
     val stages = uiState.diagnostics.stageDiagnostics
+
+    // Google Play VpnService Prominent Disclosure modal (shown before requesting VpnService.prepare() consent)
+    if (uiState.showVpnDisclosureDialog) {
+        VpnDisclosureDialog(
+            onAcceptAndContinue = viewModel::onAcceptVpnDisclosureAndConnect,
+            onDecline = viewModel::onDeclineVpnDisclosure,
+            isReadOnlyReview = false
+        )
+    }
 
     // Android 13+ (API 33+) runtime notification permission launcher for Foreground VpnService notification
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -128,7 +139,7 @@ fun HomeScreen(
     ) {
         NexoraTopBar(
             title = AppConstants.APP_NAME,
-            subtitle = "PHASE 4 · ${uiState.engineState.displayTitle} · ${uiState.totalSavedProfiles} PROFILES",
+            subtitle = "v${AppConstants.VERSION_NAME} · ${uiState.engineState.displayTitle} · ${uiState.totalSavedProfiles} PROFILES",
             actions = {
                 PremiumButton(
                     text = if (uiState.engineState.canStop) "Disconnect" else "Add Profile",

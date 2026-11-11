@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Production Security Hardening:
+        - Disallow cleartext HTTP traffic by default across the application.
+        - Permit cleartext strictly for cp.cloudflare.com so TunnelConnectivityVerifier (Stage F)
+          can perform the standard RFC captive-portal / tunnel reachability HTTP 204 check
+          (http://cp.cloudflare.com/generate_204).
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">cp.cloudflare.com</domain>
+    </domain-config>
+</network-security-config>

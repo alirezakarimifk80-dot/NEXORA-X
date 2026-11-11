@@ -8,14 +8,14 @@ plugins {
 
 android {
     namespace = "com.nexora.x"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.nexora.x"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0-phase3"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -28,7 +28,8 @@ android {
     }
 
     signingConfigs {
-        // Future release signing preparation: reads strictly from environment variables in CI/local env.
+        // Production release signing: reads strictly from environment variables in CI or local env.
+        // Never hardcodes or commits keystore files or passwords.
         // Debug APK builds remain 100% independent of release signing.
         val keystorePath = System.getenv("RELEASE_STORE_FILE")
         val keystorePassword = System.getenv("RELEASE_STORE_PASSWORD")
@@ -46,6 +47,9 @@ android {
                 storePassword = keystorePassword
                 keyAlias = keyAliasValue
                 keyPassword = keyPasswordValue
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -67,6 +71,18 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+        }
+    }
+
+    bundle {
+        language {
+            enableSplit = true
+        }
+        density {
+            enableSplit = true
+        }
+        abi {
+            enableSplit = true
         }
     }
 

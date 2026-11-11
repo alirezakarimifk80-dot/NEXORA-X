@@ -17,6 +17,7 @@ interface ProfileRepository {
     val selectedProfileId: Flow<String?>
     val sortOrder: Flow<ProfileSortOrder>
     val isDarkTheme: Flow<Boolean>
+    val hasAcceptedVpnDisclosure: Flow<Boolean>
 
     suspend fun getProfileById(profileId: String): Profile?
     suspend fun saveProfile(profile: Profile)
@@ -25,6 +26,7 @@ interface ProfileRepository {
     suspend fun selectProfile(profileId: String?)
     suspend fun setSortOrder(order: ProfileSortOrder)
     suspend fun setDarkTheme(isDark: Boolean)
+    suspend fun setVpnDisclosureAccepted(accepted: Boolean)
 
     fun parseLink(rawUri: String): ParseResult
     suspend fun importFromText(rawText: String): BatchImportResult

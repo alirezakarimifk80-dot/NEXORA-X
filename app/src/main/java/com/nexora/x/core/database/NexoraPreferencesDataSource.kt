@@ -33,6 +33,7 @@ class NexoraPreferencesDataSource @Inject constructor(
         val SELECTED_PROFILE_ID = stringPreferencesKey("selected_profile_id")
         val IS_DARK_THEME = booleanPreferencesKey("is_dark_theme")
         val SORT_ORDER = stringPreferencesKey("profile_sort_order")
+        val VPN_DISCLOSURE_ACCEPTED = booleanPreferencesKey("vpn_disclosure_accepted")
     }
 
     val selectedProfileId: Flow<String?> = context.nexoraDataStore.data.map { prefs ->
@@ -48,6 +49,10 @@ class NexoraPreferencesDataSource @Inject constructor(
         runCatching {
             if (raw != null) ProfileSortOrder.valueOf(raw) else ProfileSortOrder.RECENTLY_UPDATED
         }.getOrDefault(ProfileSortOrder.RECENTLY_UPDATED)
+    }
+
+    val hasAcceptedVpnDisclosure: Flow<Boolean> = context.nexoraDataStore.data.map { prefs ->
+        prefs[Keys.VPN_DISCLOSURE_ACCEPTED] ?: false
     }
 
     suspend fun setSelectedProfileId(profileId: String?) {
@@ -69,6 +74,12 @@ class NexoraPreferencesDataSource @Inject constructor(
     suspend fun setSortOrder(order: ProfileSortOrder) {
         context.nexoraDataStore.edit { prefs ->
             prefs[Keys.SORT_ORDER] = order.name
+        }
+    }
+
+    suspend fun setVpnDisclosureAccepted(accepted: Boolean) {
+        context.nexoraDataStore.edit { prefs ->
+            prefs[Keys.VPN_DISCLOSURE_ACCEPTED] = accepted
         }
     }
 }

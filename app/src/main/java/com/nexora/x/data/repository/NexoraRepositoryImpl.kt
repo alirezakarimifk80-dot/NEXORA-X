@@ -137,24 +137,24 @@ class NexoraRepositoryImpl @Inject constructor() : NexoraRepository {
                 id = "dns_settings",
                 category = SettingsCategory.CONNECTION,
                 title = "DNS Settings",
-                subtitle = "Configure Remote DNS, Direct DNS, and DoH endpoints",
-                currentValue = "Pending Core",
-                status = SettingImplementationStatus.COMING_SOON_PHASE_3
+                subtitle = "Direct bootstrap 1.1.1.1 + Proxy DoH https://1.1.1.1/dns-query (prefer_ipv4)",
+                currentValue = "Active · Dual Resolver",
+                status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
             SettingsOption(
                 id = "routing_settings",
                 category = SettingsCategory.CONNECTION,
                 title = "Routing Settings",
-                subtitle = "Domain strategy (AsIs, IPIfNonMatch) & GeoSite rules",
-                currentValue = "Pending Core",
-                status = SettingImplementationStatus.COMING_SOON_PHASE_3
+                subtitle = "Outbound DNS bootstrap rule, RFC1918 private IP bypass & proxy final route",
+                currentValue = "Active · Auto-Detect Interface",
+                status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
             SettingsOption(
                 id = "per_app_proxy",
                 category = SettingsCategory.CONNECTION,
                 title = "Per-App Proxy",
-                subtitle = "Split tunneling allowlist and bypass package rules",
-                currentValue = "Pending VpnService",
+                subtitle = "Self-package bypass active (com.nexora.x); custom per-app UI coming soon",
+                currentValue = "Self-Bypass Active",
                 status = SettingImplementationStatus.COMING_SOON_PHASE_3
             ),
             // ADVANCED
@@ -162,15 +162,15 @@ class NexoraRepositoryImpl @Inject constructor() : NexoraRepository {
                 id = "tun_settings",
                 category = SettingsCategory.ADVANCED,
                 title = "TUN Settings",
-                subtitle = "MTU 9000, system stack, 172.19.0.1/30 & self-bypass active",
-                currentValue = "MTU 9000 · Auto Route",
+                subtitle = "MTU 1500, gVisor user-space stack, 172.19.0.1/30 & non-blocking detached FD",
+                currentValue = "MTU 1500 · gVisor Stack",
                 status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
             SettingsOption(
                 id = "adv_diagnostics",
                 category = SettingsCategory.ADVANCED,
                 title = "Network Diagnostics",
-                subtitle = "SingBoxConfigGenerator & Libbox.checkConfig validator",
+                subtitle = "6-Stage Tunnel Connectivity Verifier (Stages A–F) & Libbox.checkConfig",
                 currentValue = "Active in Tools Tab",
                 status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
@@ -184,10 +184,26 @@ class NexoraRepositoryImpl @Inject constructor() : NexoraRepository {
             ),
             // ABOUT
             SettingsOption(
+                id = "vpn_disclosure",
+                category = SettingsCategory.ABOUT,
+                title = "VPN Service Prominent Disclosure",
+                subtitle = "Review how NEXORA X uses Android VpnService & protects local profile data",
+                currentValue = "Tap to Review",
+                status = SettingImplementationStatus.ACTIVE_PHASE_1
+            ),
+            SettingsOption(
+                id = "privacy_policy",
+                category = SettingsCategory.ABOUT,
+                title = "Privacy Policy & Data Safety",
+                subtitle = "100% local profile storage · Zero remote analytics, ads, or data sharing",
+                currentValue = "Zero Data Collected",
+                status = SettingImplementationStatus.ACTIVE_PHASE_1
+            ),
+            SettingsOption(
                 id = "app_version",
                 category = SettingsCategory.ABOUT,
                 title = "Application Version",
-                subtitle = "Build target SDK 35 · Min SDK 26",
+                subtitle = "Compile & Target SDK 36 · Min SDK 26 · Version Code ${AppConstants.VERSION_CODE}",
                 currentValue = AppConstants.VERSION_NAME,
                 status = SettingImplementationStatus.ACTIVE_PHASE_1
             ),
@@ -203,7 +219,7 @@ class NexoraRepositoryImpl @Inject constructor() : NexoraRepository {
                 id = "licenses",
                 category = SettingsCategory.ABOUT,
                 title = "Open-Source Licenses",
-                subtitle = "sing-box (libbox v1.10.7, GPL-3.0-or-later), Jetpack Compose, Room, Hilt",
+                subtitle = "sing-box (libbox v1.10.7, GPL-3.0-or-later), Jetpack Compose, Room, Hilt (Apache-2.0)",
                 currentValue = "GPL-3.0-or-later & Apache-2.0",
                 status = SettingImplementationStatus.ACTIVE_PHASE_1
             )

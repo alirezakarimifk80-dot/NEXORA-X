@@ -29,6 +29,7 @@ import com.nexora.x.core.design.theme.NexoraColors
 import com.nexora.x.core.ui.components.NexoraTopBar
 import com.nexora.x.core.ui.components.SectionHeader
 import com.nexora.x.core.ui.components.SettingsItem
+import com.nexora.x.core.ui.components.VpnDisclosureDialog
 import com.nexora.x.domain.model.SettingsCategory
 
 /**
@@ -37,7 +38,7 @@ import com.nexora.x.domain.model.SettingsCategory
  * - GENERAL (Language, Theme, App appearance)
  * - CONNECTION (Auto connect, DNS settings, Routing settings, Per-app proxy)
  * - ADVANCED (TUN settings, Network diagnostics, Connection logs)
- * - ABOUT (Application version, Developer information, Open-source licenses)
+ * - ABOUT (VPN Service Prominent Disclosure, Privacy Policy, Application version, Developer information, Open-source licenses)
  * Unimplemented settings are visibly marked as COMING SOON.
  */
 @Composable
@@ -46,6 +47,14 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    if (uiState.showVpnDisclosureDialog) {
+        VpnDisclosureDialog(
+            onAcceptAndContinue = viewModel::onDismissVpnDisclosure,
+            onDecline = viewModel::onDismissVpnDisclosure,
+            isReadOnlyReview = true
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -53,7 +62,7 @@ fun SettingsScreen(
     ) {
         NexoraTopBar(
             title = "SETTINGS",
-            subtitle = "SYSTEM CONFIGURATION & ARCHITECTURE"
+            subtitle = "SYSTEM CONFIGURATION & PRIVACY CENTER"
         )
 
         Column(

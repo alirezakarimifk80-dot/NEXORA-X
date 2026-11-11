@@ -242,5 +242,13 @@ class SingBoxEngineAndConfigTest {
         assertNotNull(Class.forName("go.Seq", false, cl))
     }
 
+    @Test
+    fun `Production v1_0_0 release metadata and pinned sing-box version are aligned`() {
+        assertEquals("NEXORA X", com.nexora.x.core.common.AppConstants.APP_NAME)
+        assertEquals("1.0.0", com.nexora.x.core.common.AppConstants.VERSION_NAME)
+        assertEquals(4, com.nexora.x.core.common.AppConstants.VERSION_CODE)
+        assertEquals("1.10.7", LibboxManager.PINNED_SINGBOX_VERSION)
+    }
+
     private class TestContextStub : android.content.ContextWrapper(null)
 }

@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">
+  <defs>
+    <linearGradient id="fgBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#050811" />
+      <stop offset="50%" stop-color="#0A1022" />
+      <stop offset="100%" stop-color="#111936" />
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="100%" stop-color="#00BBF9" />
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9B5DE5" />
+      <stop offset="100%" stop-color="#6D28D9" />
+    </linearGradient>
+    <radialGradient id="orbGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00F5D4" stop-opacity="0.24" />
+      <stop offset="60%" stop-color="#7C3AED" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#050811" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- 1024x500 Google Play Feature Graphic Canvas -->
+  <rect width="1024" height="500" fill="url(#fgBg)" />
+
+  <!-- Subtle Technical Telemetry Grid Lines -->
+  <g stroke="#1E293B" stroke-width="1" opacity="0.55">
+    <line x1="0" y1="100" x2="1024" y2="100" />
+    <line x1="0" y1="250" x2="1024" y2="250" />
+    <line x1="0" y1="400" x2="1024" y2="400" />
+    <line x1="160" y1="0" x2="160" y2="500" />
+    <line x1="560" y1="0" x2="560" y2="500" />
+    <line x1="860" y1="0" x2="860" y2="500" />
+  </g>
+
+  <!-- Right-Side Emblem & 6-Stage Tunnel Visualization -->
+  <circle cx="790" cy="250" r="210" fill="url(#orbGlow)" />
+  <circle cx="790" cy="250" r="158" fill="none" stroke="#1E293B" stroke-width="2" />
+  <circle cx="790" cy="250" r="130" fill="none" stroke="url(#purpleGrad)" stroke-width="2.5" stroke-dasharray="12 8" opacity="0.75" />
+
+  <polygon
+    points="790,110 911,180 911,320 790,390 669,320 669,180"
+    fill="#090E1E"
+    fill-opacity="0.88"
+    stroke="url(#cyanGrad)"
+    stroke-width="4.5"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M726 310 L726 190 L790 254 L854 190 L854 310"
+    fill="none"
+    stroke="url(#purpleGrad)"
+    stroke-width="15"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M732 194 L848 306 M848 194 L732 306"
+    fill="none"
+    stroke="url(#cyanGrad)"
+    stroke-width="16"
+    stroke-linecap="round"
+  />
+  <circle cx="790" cy="250" r="16" fill="#050811" stroke="#00F5D4" stroke-width="4.5" />
+  <circle cx="790" cy="250" r="6" fill="#00F5D4" />
+
+  <!-- Left-Side Typography & Architecture Spec -->
+  <rect x="72" y="88" width="248" height="30" rx="6" fill="#0D162C" stroke="#00F5D4" stroke-width="1.2" />
+  <text x="88" y="108" fill="#00F5D4" font-family="monospace" font-size="13" font-weight="700" letter-spacing="1.5">
+    SING-BOX LIBBOX v1.10.7 CORE
+  </text>
+
+  <text x="70" y="196" fill="#F8FAFC" font-family="sans-serif" font-size="72" font-weight="900" letter-spacing="-1.5">
+    NEXORA X
+  </text>
+
+  <text x="72" y="244" fill="#94A3B8" font-family="sans-serif" font-size="22" font-weight="500">
+    Native Android VPN &amp; Proxy Client Utility
+  </text>
+
+  <!-- Protocol Badges -->
+  <g transform="translate(72, 282)" font-family="monospace" font-size="14" font-weight="700">
+    <rect x="0" y="0" width="94" height="36" rx="8" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+    <text x="23" y="23" fill="#00F5D4">VLESS</text>
+
+    <rect x="108" y="0" width="98" height="36" rx="8" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+    <text x="131" y="23" fill="#E2E8F0">VMess</text>
+
+    <rect x="220" y="0" width="104" height="36" rx="8" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+    <text x="244" y="23" fill="#E2E8F0">Trojan</text>
+
+    <rect x="338" y="0" width="142" height="36" rx="8" fill="#0F172A" stroke="#334155" stroke-width="1.5" />
+    <text x="357" y="23" fill="#E2E8F0">Shadowsocks</text>
+  </g>
+
+  <!-- Bottom Technical Highlights -->
+  <text x="72" y="378" fill="#00F5D4" font-family="monospace" font-size="14" font-weight="600" letter-spacing="0.8">
+    &#x2713; 6-STAGE TUNNEL VERIFIER   &#x2713; REAL TCP LATENCY   &#x2713; 100% LOCAL STORAGE
+  </text>
+  <text x="72" y="408" fill="#64748B" font-family="sans-serif" font-size="14">
+    Bring-your-own-configuration client &middot; Zero ads &middot; Zero mandatory accounts
+  </text>
+</svg>

@@ -1,4 +1,4 @@
-name: NEXORA X — Android Debug APK CI
+name: NEXORA X — Android APK & Google Play Release AAB CI
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       build_reason:
-        description: 'Optional note for this manual APK build'
+        description: 'Optional note for this manual APK / AAB build'
         required: false
         default: 'Manual workflow_dispatch build'
         type: string
@@ -18,15 +18,16 @@ permissions:
 env:
   JAVA_VERSION: '17'
   GRADLE_VERSION: '8.9'
-  COMPILE_SDK: '35'
+  COMPILE_SDK: '36'
   BUILD_TOOLS_VERSION: '35.0.0'
   APP_MODULE: ':app'
   APK_OUTPUT_DIR: 'app/build/outputs/apk/debug'
+  AAB_OUTPUT_DIR: 'app/build/outputs/bundle/release'
   SINGBOX_PINNED_VERSION: '1.10.7'
 
 jobs:
   build-debug-apk:
-    name: Test & Assemble NEXORA X Debug APK
+    name: Test, Assemble Debug APK & Bundle Release AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -42,7 +43,7 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 3. Set Up Android SDK (API 35 & Build-Tools 35.0.0)
+      - name: 3. Set Up Android SDK (API 36 & Build-Tools 35.0.0)
         id: android_sdk_setup
         run: |
           set -e
@@ -173,7 +174,7 @@ jobs:
         id: unit_tests
         run: |
           set -o pipefail
-          echo "Running NEXORA X unit test suites (Phase 1, Phase 2, Phase 3 + libbox v1.10.7 classpath check)..."
+          echo "Running NEXORA X unit test suites (Phase 1–4 + Production v1.0.0 + libbox v1.10.7 classpath check)..."
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle-build.log
 
       - name: 9. Build Android Debug APK (./gradlew assembleDebug)
@@ -183,7 +184,28 @@ jobs:
           echo "Assembling NEXORA X Debug APK (:app:assembleDebug)..."
           ./gradlew assembleDebug --stacktrace 2>&1 | tee -a gradle-build.log
 
-      - name: 10. Verify APK Output, Native libbox.so ABIs & Generate build-info.txt
+      - name: 9b. Prepare Optional Release Signing & Build Google Play Release AAB (./gradlew bundleRelease)
+        id: bundle_release
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ] && [ -n "${RELEASE_STORE_PASSWORD:-}" ] && [ -n "${RELEASE_KEY_ALIAS:-}" ] && [ -n "${RELEASE_KEY_PASSWORD:-}" ]; then
+            echo "Release signing secrets detected; decoding upload keystore to /tmp/nexora-upload.jks..."
+            echo "${RELEASE_KEYSTORE_BASE64}" | base64 --decode > /tmp/nexora-upload.jks
+            export RELEASE_STORE_FILE="/tmp/nexora-upload.jks"
+            echo "RELEASE_SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "No RELEASE_KEYSTORE_BASE64 secret configured; building unsigned release AAB for R8/Play Bundle verification..."
+            echo "RELEASE_SIGNED=false" >> "$GITHUB_ENV"
+          fi
+          ./gradlew bundleRelease --stacktrace 2>&1 | tee -a gradle-build.log
+          rm -f /tmp/nexora-upload.jks
+
+      - name: 10. Verify APK & AAB Outputs, Native libbox.so ABIs & Generate build-info.txt
         id: verify_and_metadata
         run: |
           set -euo pipefail
@@ -207,6 +229,14 @@ jobs:
           unzip -l "${APK_FILE}" | grep -q "lib/x86_64/libbox.so"
           unzip -l "${APK_FILE}" | grep -q "lib/x86/libbox.so"
 
+          AAB_FILE=$(find "${AAB_OUTPUT_DIR}" -maxdepth 2 -type f -name "*.aab" | head -n 1 || true)
+          AAB_BYTES="N/A"
+          AAB_SHA256="N/A"
+          if [ -n "${AAB_FILE}" ] && [ -s "${AAB_FILE}" ]; then
+            AAB_BYTES=$(wc -c < "${AAB_FILE}" | tr -d ' ')
+            AAB_SHA256=$(sha256sum "${AAB_FILE}" | awk '{print $1}')
+          fi
+
           APK_FILENAME=$(basename "${APK_FILE}")
           APK_BYTES=$(wc -c < "${APK_FILE}" | tr -d ' ')
           APK_SHA256=$(sha256sum "${APK_FILE}" | awk '{print $1}')
@@ -218,24 +248,24 @@ jobs:
 
           cat <<EOF > build-info.txt
           ============================================================
-          NEXORA X — ANDROID BUILD INFORMATION
+          NEXORA X — ANDROID PRODUCTION BUILD INFORMATION
           ============================================================
           App Name         : NEXORA X
           Package Name     : com.nexora.x (Debug App ID: com.nexora.x.debug)
           Build Date (UTC) : ${BUILD_DATE_UTC}
           Git Commit SHA   : ${GITHUB_SHA}
           Git Ref / Branch : ${GITHUB_REF_NAME}
-          Build Variant    : debug
-          Version Name     : ${VERSION_NAME}-debug (base: ${VERSION_NAME})
+          Compile / Target : SDK ${COMPILE_SDK} (Min SDK 26)
+          Version Name     : ${VERSION_NAME} (Debug: ${VERSION_NAME}-debug)
           Version Code     : ${VERSION_CODE}
           sing-box Version : ${SINGBOX_VERSION} (io.nekohasekai.libbox, app/libs/libbox.aar)
           Native ABIs      : arm64-v8a, armeabi-v7a, x86_64, x86 (libbox.so verified)
           JDK Version      : ${JAVA_VERSION} (Eclipse Temurin)
           Gradle Version   : ${GRADLE_VERSION}
-          APK File Name    : ${APK_FILENAME}
-          APK File Path    : ${APK_FILE}
-          APK Size (Bytes) : ${APK_BYTES}
-          APK SHA-256      : ${APK_SHA256}
+          Debug APK File   : ${APK_FILE} (${APK_BYTES} bytes)
+          Debug APK SHA256 : ${APK_SHA256}
+          Release AAB File : ${AAB_FILE:-Not generated} (${AAB_BYTES} bytes, Signed: ${RELEASE_SIGNED:-false})
+          Release AAB SHA  : ${AAB_SHA256}
           ============================================================
           EOF
 
@@ -243,24 +273,23 @@ jobs:
           cat build-info.txt
 
           {
-            echo "### NEXORA X Debug APK Build Succeeded"
+            echo "### NEXORA X Android Build Succeeded (Debug APK + Release AAB)"
             echo ""
             echo "| Field | Value |"
             echo "| :--- | :--- |"
             echo "| **App Name** | \`NEXORA X\` |"
             echo "| **Package Name** | \`com.nexora.x\` (\`com.nexora.x.debug\`) |"
-            echo "| **Build Variant** | \`debug\` |"
-            echo "| **Version Name** | \`${VERSION_NAME}-debug\` |"
-            echo "| **Version Code** | \`${VERSION_CODE}\` |"
+            echo "| **Compile / Target SDK** | \`${COMPILE_SDK}\` (Min SDK \`26\`) |"
+            echo "| **Version Name** | \`${VERSION_NAME}\` (Code \`${VERSION_CODE}\`) |"
             echo "| **sing-box Version** | \`${SINGBOX_VERSION}\` (\`io.nekohasekai.libbox\` + \`libbox.so\`) |"
             echo "| **Native ABIs** | \`arm64-v8a\`, \`armeabi-v7a\`, \`x86_64\`, \`x86\` |"
             echo "| **Git Commit SHA** | \`${GITHUB_SHA}\` |"
             echo "| **Build Date (UTC)** | \`${BUILD_DATE_UTC}\` |"
-            echo "| **APK File** | \`${APK_FILE}\` (\`${APK_BYTES}\` bytes) |"
-            echo "| **APK SHA-256** | \`${APK_SHA256}\` |"
+            echo "| **Debug APK** | \`${APK_FILE}\` (\`${APK_BYTES}\` bytes, SHA-256: \`${APK_SHA256}\`) |"
+            echo "| **Release AAB** | \`${AAB_FILE:-N/A}\` (\`${AAB_BYTES}\` bytes, Signed: \`${RELEASE_SIGNED:-false}\`) |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 11. Upload NEXORA-X-APK Artifact (APK + build-info.txt)
+      - name: 11. Upload NEXORA-X-APK Artifact (Debug APK + build-info.txt)
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -270,6 +299,17 @@ jobs:
             build-info.txt
           retention-days: 14
           if-no-files-found: error
+
+      - name: 11b. Upload NEXORA-X-RELEASE-AAB Artifact (Google Play Bundle + build-info.txt)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEXORA-X-RELEASE-AAB
+          path: |
+            app/build/outputs/bundle/release/**/*.aab
+            build-info.txt
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: 12. Diagnose Build or Test Failure
         if: failure()
@@ -282,7 +322,7 @@ jobs:
           if [ "${{ steps.android_sdk_setup.outcome }}" == "failure" ]; then
             FAILED_TASK="3. Set Up Android SDK"
             CAUSE_EXPLANATION="Android SDK package installation or license acceptance failed."
-            CONCRETE_FIX="Verify ANDROID_HOME permissions and availability of platforms;android-35 and build-tools;35.0.0."
+            CONCRETE_FIX="Verify ANDROID_HOME permissions and availability of platforms;android-36 and build-tools;35.0.0."
           elif [ "${{ steps.prepare_libbox_aar.outcome }}" == "failure" ]; then
             FAILED_TASK="4. Assemble & Verify Official sing-box libbox.aar (v1.10.7)"
             CAUSE_EXPLANATION="Failed to download or assemble app/libs/libbox.aar from official SagerNet/sing-box v1.10.7 release."
@@ -295,6 +335,10 @@ jobs:
             FAILED_TASK=":app:assembleDebug"
             CAUSE_EXPLANATION="Android Debug APK compilation, KSP (Room/Hilt) code generation, or resource packaging failed."
             CONCRETE_FIX="Check step '9. Build Android Debug APK' for unresolved symbols, Room schema errors, or AndroidManifest.xml issues."
+          elif [ "${{ steps.bundle_release.outcome }}" == "failure" ]; then
+            FAILED_TASK=":app:bundleRelease"
+            CAUSE_EXPLANATION="Google Play Release AAB compilation or R8 minification failed."
+            CONCRETE_FIX="Check app/proguard-rules.pro and step '9b. Build Google Play Release AAB' for R8 shrinker issues."
           elif [ "${{ steps.verify_and_metadata.outcome }}" == "failure" ]; then
             FAILED_TASK="APK Verification (verify_and_metadata)"
             CAUSE_EXPLANATION="Gradle finished without producing a non-empty .apk file with lib/*/libbox.so in app/build/outputs/apk/debug/."

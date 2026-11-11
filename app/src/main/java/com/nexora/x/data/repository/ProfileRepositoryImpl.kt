@@ -37,6 +37,8 @@ class ProfileRepositoryImpl @Inject constructor(
 
     override val isDarkTheme: Flow<Boolean> = preferencesDataSource.isDarkTheme
 
+    override val hasAcceptedVpnDisclosure: Flow<Boolean> = preferencesDataSource.hasAcceptedVpnDisclosure
+
     override val totalProfileCount: Flow<Int> = profileDao.observeProfileCount()
 
     override val profiles: Flow<List<Profile>> = combine(
@@ -107,6 +109,10 @@ class ProfileRepositoryImpl @Inject constructor(
 
     override suspend fun setDarkTheme(isDark: Boolean) {
         preferencesDataSource.setDarkTheme(isDark)
+    }
+
+    override suspend fun setVpnDisclosureAccepted(accepted: Boolean) {
+        preferencesDataSource.setVpnDisclosureAccepted(accepted)
     }
 
     override fun parseLink(rawUri: String): ParseResult {
